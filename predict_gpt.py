@@ -2,6 +2,7 @@ import json
 import requests
 
 from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -10,6 +11,14 @@ from indicators import (
     make_snapshot,
 )
 
+from db import (
+    init_db,
+    save_prediction,
+    prediction_exists,
+)
+
+
+MODEL = "gpt-5.6-sol"
 
 URL = (
     "https://api.exchange.coinbase.com/"
@@ -17,7 +26,7 @@ URL = (
 )
 
 HEADERS = {
-    "User-Agent": "btc-predict/0.5"
+    "User-Agent": "btc-predict/0.6"
 }
 
 
@@ -95,13 +104,12 @@ MARKET DATA:
 """.strip()
 
     response = client.responses.create(
-        model="gpt-5.6-sol",
+        model=MODEL,
         input=prompt,
     )
 
     text = response.output_text.strip()
 
-    # Remove accidental Markdown fences if present.
     if text.startswith("```"):
         lines = text.splitlines()
 
@@ -118,6 +126,8 @@ MARKET DATA:
 
 def main():
     load_dotenv()
+
+    init_db()
 
     candles = get_candles()
 
@@ -136,24 +146,86 @@ def main():
 
     snapshot = make_snapshot(df)
 
+    # Last completed candle
+    latest = df.iloc[-1]
+
+    candle_time = int(
+        latest["timestamp"]
+    )
+
+    candle_close = float(
+        latest["close"]
+    )
+
+    # Do not call the API again if this candle
+    # has already been predicted by this model.
+    if prediction_exists(candle_time, MODEL):
+        print(
+            f"Prediction already exists: "
+            f"candle_time={candle_time}, "
+            f"model={MODEL}"
+        )
+        print("Skipping.")
+        return
+
     print("===== INPUT =====")
     print(snapshot)
     print()
 
     result = predict(snapshot)
 
+    p_up = float(result["p_up"])
+    p_down = float(result["p_down"])
+    reason = result.get("reason", "")
+
+    # Basic validation
+    if not 0 <= p_up <= 1:
+        raise ValueError(
+            f"Invalid p_up: {p_up}"
+        )
+
+    if not 0 <= p_down <= 1:
+        raise ValueError(
+            f"Invalid p_down: {p_down}"
+        )
+
+    if abs((p_up + p_down) - 1.0) > 0.01:
+        raise ValueError(
+            "Probabilities do not sum to 1"
+        )
+
     print("===== GPT PREDICTION =====")
 
     print(
-        f"P(UP)   = {result['p_up']:.3f}"
+        f"P(UP)   = {p_up:.3f}"
     )
 
     print(
-        f"P(DOWN) = {result['p_down']:.3f}"
+        f"P(DOWN) = {p_down:.3f}"
     )
 
     print(
-        f"Reason  = {result['reason']}"
+        f"Reason  = {reason}"
+    )
+
+    created_at = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    prediction_id = save_prediction(
+        created_at=created_at,
+        candle_time=candle_time,
+        candle_close=candle_close,
+        model=MODEL,
+        p_up=p_up,
+        p_down=p_down,
+        reason=reason,
+        context=snapshot,
+    )
+
+    print()
+    print(
+        f"Saved prediction id={prediction_id}"
     )
 
 
