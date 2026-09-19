@@ -1,9 +1,9 @@
+import html
 import sqlite3
-import requests
-
-from datetime import datetime, timezone
 from pathlib import Path
+from datetime import datetime, timezone
 
+import requests
 from flask import Flask
 
 
@@ -17,7 +17,7 @@ COINBASE_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "btc-predict-dashboard/0.1"
+    "User-Agent": "btc-predict-dashboard/0.2"
 }
 
 
@@ -36,93 +36,7 @@ def get_btc_price():
 
     r.raise_for_status()
 
-    return float(
-        r.json()["price"]
-    )
-
-
-def get_latest_prediction():
-    with connect() as conn:
-        row = conn.execute("""
-            SELECT *
-            FROM predictions
-            ORDER BY candle_time DESC
-            LIMIT 1
-        """).fetchone()
-
-    return row
-
-
-def get_recent_predictions(limit=10):
-    with connect() as conn:
-        rows = conn.execute("""
-            SELECT *
-            FROM predictions
-            ORDER BY candle_time DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-
-    return rows
-
-
-def get_statistics():
-    with connect() as conn:
-        rows = conn.execute("""
-            SELECT
-                p_up,
-                p_down,
-                actual_direction,
-                correct
-            FROM predictions
-            WHERE actual_direction IN ('UP', 'DOWN')
-        """).fetchall()
-
-    n = len(rows)
-
-    if n == 0:
-        return {
-            "n": 0,
-            "accuracy": None,
-            "brier": None,
-            "confidence": None,
-        }
-
-    hits = 0
-    brier_sum = 0.0
-    confidence_sum = 0.0
-
-    for row in rows:
-        p_up = float(
-            row["p_up"]
-        )
-
-        p_down = float(
-            row["p_down"]
-        )
-
-        if row["actual_direction"] == "UP":
-            outcome = 1.0
-        else:
-            outcome = 0.0
-
-        brier_sum += (
-            p_up - outcome
-        ) ** 2
-
-        confidence_sum += max(
-            p_up,
-            p_down,
-        )
-
-        if row["correct"] == 1:
-            hits += 1
-
-    return {
-        "n": n,
-        "accuracy": hits / n,
-        "brier": brier_sum / n,
-        "confidence": confidence_sum / n,
-    }
+    return float(r.json()["price"])
 
 
 def format_time(timestamp):
@@ -139,9 +53,221 @@ def format_time(timestamp):
     )
 
 
+def get_latest_battle():
+    """
+    Find the latest candle_time for which
+    both GPT and Jev predictions exist.
+    """
+
+    with connect() as conn:
+        row = conn.execute("""
+            SELECT candle_time
+            FROM predictions
+            GROUP BY candle_time
+            HAVING
+                SUM(
+                    CASE
+                    WHEN predictor = 'openai'
+                    THEN 1
+                    ELSE 0
+                    END
+                ) > 0
+                AND
+                SUM(
+                    CASE
+                    WHEN predictor = 'jev'
+                    THEN 1
+                    ELSE 0
+                    END
+                ) > 0
+            ORDER BY candle_time DESC
+            LIMIT 1
+        """).fetchone()
+
+        if row is None:
+            return None, None
+
+        candle_time = row["candle_time"]
+
+        rows = conn.execute("""
+            SELECT *
+            FROM predictions
+            WHERE candle_time = ?
+            ORDER BY predictor
+        """, (
+            candle_time,
+        )).fetchall()
+
+    gpt = None
+    jev = None
+
+    for row in rows:
+        if row["predictor"] == "openai":
+            gpt = row
+
+        elif row["predictor"] == "jev":
+            jev = row
+
+    return gpt, jev
+
+
+def get_model_statistics(predictor):
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT
+                p_up,
+                p_down,
+                actual_direction,
+                correct
+            FROM predictions
+            WHERE predictor = ?
+              AND actual_direction IN ('UP', 'DOWN')
+        """, (
+            predictor,
+        )).fetchall()
+
+    n = len(rows)
+
+    if n == 0:
+        return {
+            "n": 0,
+            "wins": 0,
+            "accuracy": None,
+            "brier": None,
+            "strength": None,
+        }
+
+    wins = 0
+    brier_sum = 0.0
+    strength_sum = 0.0
+
+    for row in rows:
+        p_up = float(row["p_up"])
+        p_down = float(row["p_down"])
+
+        if row["actual_direction"] == "UP":
+            outcome = 1.0
+        else:
+            outcome = 0.0
+
+        brier_sum += (
+            p_up - outcome
+        ) ** 2
+
+        strength_sum += max(
+            p_up,
+            p_down,
+        )
+
+        if row["correct"] == 1:
+            wins += 1
+
+    return {
+        "n": n,
+        "wins": wins,
+        "accuracy": wins / n,
+        "brier": brier_sum / n,
+        "strength": strength_sum / n,
+    }
+
+
+def get_recent_battles(limit=12):
+    """
+    Return recent candle_times having
+    both GPT and Jev predictions.
+    """
+
+    with connect() as conn:
+        times = conn.execute("""
+            SELECT candle_time
+            FROM predictions
+            GROUP BY candle_time
+            HAVING
+                SUM(
+                    CASE
+                    WHEN predictor = 'openai'
+                    THEN 1
+                    ELSE 0
+                    END
+                ) > 0
+                AND
+                SUM(
+                    CASE
+                    WHEN predictor = 'jev'
+                    THEN 1
+                    ELSE 0
+                    END
+                ) > 0
+            ORDER BY candle_time DESC
+            LIMIT ?
+        """, (
+            limit,
+        )).fetchall()
+
+        battles = []
+
+        for item in times:
+            candle_time = item["candle_time"]
+
+            rows = conn.execute("""
+                SELECT *
+                FROM predictions
+                WHERE candle_time = ?
+            """, (
+                candle_time,
+            )).fetchall()
+
+            gpt = None
+            jev = None
+
+            for row in rows:
+                if row["predictor"] == "openai":
+                    gpt = row
+
+                elif row["predictor"] == "jev":
+                    jev = row
+
+            if gpt and jev:
+                battles.append(
+                    (gpt, jev)
+                )
+
+    return battles
+
+
+def direction(row):
+    if row is None:
+        return "-"
+
+    if float(row["p_up"]) >= float(row["p_down"]):
+        return "UP"
+
+    return "DOWN"
+
+
+def direction_arrow(row):
+    if direction(row) == "UP":
+        return "↑"
+
+    if direction(row) == "DOWN":
+        return "↓"
+
+    return "-"
+
+
+def probability_strength(row):
+    if row is None:
+        return 0.0
+
+    return max(
+        float(row["p_up"]),
+        float(row["p_down"]),
+    )
+
+
 def result_symbol(row):
     if row["actual_direction"] is None:
-        return "Waiting"
+        return "…"
 
     if row["correct"] == 1:
         return "✓"
@@ -152,179 +278,218 @@ def result_symbol(row):
     return "-"
 
 
+def stat_text(value, kind):
+    if value is None:
+        return "-"
+
+    if kind == "percent":
+        return f"{value * 100:.1f}%"
+
+    if kind == "brier":
+        return f"{value:.4f}"
+
+    return str(value)
+
+
+def prediction_card(row, title):
+    if row is None:
+        return """
+        <div class="predictor-card">
+            <h3>Unavailable</h3>
+        </div>
+        """
+
+    p_up = float(row["p_up"])
+    p_down = float(row["p_down"])
+
+    predicted = direction(row)
+    strength = probability_strength(row)
+
+    model_version = html.escape(
+        row["model_version"]
+        or row["model"]
+        or "-"
+    )
+
+    reason = html.escape(
+        row["reason"] or "-"
+    )
+
+    confidence = row["confidence"]
+
+    if confidence is None:
+        confidence_text = "—"
+    else:
+        confidence_text = (
+            f"{float(confidence) * 100:.1f}%"
+        )
+
+    predicted_class = (
+        "up-text"
+        if predicted == "UP"
+        else "down-text"
+    )
+
+    return f"""
+    <div class="predictor-card">
+
+        <div class="predictor-name">
+            {html.escape(title)}
+        </div>
+
+        <div class="model-version">
+            {model_version}
+        </div>
+
+        <div class="big-prediction {predicted_class}">
+            {direction_arrow(row)} {predicted}
+        </div>
+
+        <div class="big-percent">
+            {strength * 100:.1f}%
+        </div>
+
+        <div class="prob-row">
+            <span>UP</span>
+            <div class="mini-bar">
+                <div
+                    class="mini-up"
+                    style="width:{p_up * 100:.1f}%">
+                </div>
+            </div>
+            <strong>{p_up * 100:.1f}%</strong>
+        </div>
+
+        <div class="prob-row">
+            <span>DOWN</span>
+            <div class="mini-bar">
+                <div
+                    class="mini-down"
+                    style="width:{p_down * 100:.1f}%">
+                </div>
+            </div>
+            <strong>{p_down * 100:.1f}%</strong>
+        </div>
+
+        <div class="confidence">
+            Jev confidence:
+            {confidence_text}
+        </div>
+
+        <div class="reason">
+            {reason}
+        </div>
+
+    </div>
+    """
+
+
 @app.route("/")
 def index():
 
-    # ----------------------------
-    # Current BTC price
-    # ----------------------------
-
     try:
         current_price = get_btc_price()
-
-        price_text = (
-            f"${current_price:,.2f}"
-        )
+        price_text = f"${current_price:,.2f}"
 
     except Exception:
         price_text = "Unavailable"
 
-    # ----------------------------
-    # Database
-    # ----------------------------
+    gpt, jev = get_latest_battle()
 
-    latest = get_latest_prediction()
-
-    recent = get_recent_predictions(
-        limit=10
+    gpt_stats = get_model_statistics(
+        "openai"
     )
 
-    stats = get_statistics()
+    jev_stats = get_model_statistics(
+        "jev"
+    )
 
-    # ----------------------------
-    # Latest prediction
-    # ----------------------------
+    battles = get_recent_battles(
+        limit=12
+    )
 
-    if latest:
-
-        p_up = float(
-            latest["p_up"]
-        )
-
-        p_down = float(
-            latest["p_down"]
-        )
-
-        up_percent = p_up * 100
-        down_percent = p_down * 100
-
-        prediction = (
-            "UP"
-            if p_up >= p_down
-            else "DOWN"
-        )
-
-        latest_time = format_time(
-            latest["candle_time"]
-        )
-
-        latest_model = latest["model"]
-
-        latest_reason = (
-            latest["reason"] or "-"
-        )
-
-    else:
-
-        up_percent = 50
-        down_percent = 50
-
-        prediction = "-"
-
-        latest_time = "-"
-
-        latest_model = "-"
-
-        latest_reason = (
-            "No prediction yet."
-        )
-
-    # ----------------------------
-    # Statistics
-    # ----------------------------
-
-    if stats["accuracy"] is None:
-
-        accuracy_text = "-"
-
-        brier_text = "-"
-
-        confidence_text = "-"
-
-    else:
-
-        accuracy_text = (
-            f"{stats['accuracy'] * 100:.1f}%"
-        )
-
-        brier_text = (
-            f"{stats['brier']:.4f}"
-        )
-
-        confidence_text = (
-            f"{stats['confidence'] * 100:.1f}%"
-        )
-
-    # ----------------------------
-    # Recent prediction rows
-    # ----------------------------
-
-    table_rows = ""
-
-    for row in recent:
-
-        p_up = float(
-            row["p_up"]
-        )
-
-        p_down = float(
-            row["p_down"]
-        )
-
-        predicted = (
-            "UP"
-            if p_up >= p_down
-            else "DOWN"
+    if gpt:
+        battle_time = format_time(
+            gpt["candle_time"]
         )
 
         actual = (
-            row["actual_direction"]
+            gpt["actual_direction"]
+            or "Waiting"
+        )
+
+    else:
+        battle_time = "-"
+        actual = "Waiting"
+
+    recent_rows = ""
+
+    for battle_gpt, battle_jev in battles:
+
+        candle_time = battle_gpt[
+            "candle_time"
+        ]
+
+        gpt_strength = (
+            probability_strength(
+                battle_gpt
+            )
+        )
+
+        jev_strength = (
+            probability_strength(
+                battle_jev
+            )
+        )
+
+        actual_direction = (
+            battle_gpt["actual_direction"]
             or "-"
+        )      
+
+        actual_return = (
+            battle_gpt["actual_return"]
+        )   
+
+        if actual_return is None:
+            actual_text = "-"
+        else:
+            actual_text = (
+                f"{actual_direction} "
+                f"{float(actual_return):+.2f}%"
         )
 
-        result = result_symbol(
-            row
-        )
 
-        table_rows += f"""
+        recent_rows += f"""
         <tr>
             <td>
-                {format_time(row["candle_time"])}
+                {format_time(candle_time)}
             </td>
 
             <td>
-                {row["model"]}
+                <span class="prediction-inline">
+                    {direction_arrow(battle_gpt)}
+                    {gpt_strength * 100:.0f}%
+                </span>
+                {result_symbol(battle_gpt)}
             </td>
 
             <td>
-                {p_up * 100:.1f}%
+                <span class="prediction-inline">
+                    {direction_arrow(battle_jev)}
+                    {jev_strength * 100:.0f}%
+                </span>
+                {result_symbol(battle_jev)}
             </td>
 
             <td>
-                {p_down * 100:.1f}%
-            </td>
-
-            <td>
-                {predicted}
-            </td>
-
-            <td>
-                {actual}
-            </td>
-
-            <td>
-                {result}
+                {actual_text}
             </td>
         </tr>
         """
 
-    # ----------------------------
-    # HTML
-    # ----------------------------
-
     return f"""
 <!doctype html>
-
 <html>
 
 <head>
@@ -336,9 +501,29 @@ def index():
     content="width=device-width, initial-scale=1"
 >
 
+<meta
+    http-equiv="refresh"
+    content="300"
+>
+
+<link
+    rel="icon"
+    type="image/png"
+    href="/static/btc.png"
+>
+
+<link
+    rel="apple-touch-icon"
+    href="/static/btc.png"
+>
+
 <title>BTC Predictor</title>
 
 <style>
+
+* {{
+    box-sizing: border-box;
+}}
 
 body {{
     font-family:
@@ -350,151 +535,223 @@ body {{
     background: #f5f5f7;
 
     margin: 0;
-
     padding: 30px;
 
     color: #222;
 }}
 
 .container {{
-    max-width: 1000px;
+    max-width: 1050px;
     margin: auto;
 }}
 
 h1 {{
-    margin-bottom: 5px;
+    margin-bottom: 4px;
+}}
+
+h2 {{
+    margin-top: 0;
 }}
 
 .subtitle {{
     color: #777;
-    margin-bottom: 30px;
+    margin-bottom: 28px;
 }}
 
 .card {{
     background: white;
 
-    border-radius: 14px;
+    border-radius: 16px;
 
     padding: 24px;
 
-    margin-bottom: 20px;
+    margin-bottom: 22px;
 
     box-shadow:
-        0 2px 10px
-        rgba(0,0,0,0.06);
+        0 2px 12px
+        rgba(0, 0, 0, 0.06);
 }}
 
 .price {{
-    font-size: 42px;
+    font-size: 44px;
+    font-weight: 700;
+    margin-top: 5px;
+}}
+
+.battle-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
+}}
+
+.actual {{
     font-weight: 600;
 }}
 
-.prediction {{
+.battle {{
+    display: grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap: 20px;
+}}
+
+.predictor-card {{
+    background: #fafafa;
+
+    border: 1px solid #eee;
+
+    border-radius: 14px;
+
+    padding: 22px;
+}}
+
+.predictor-name {{
+    font-size: 22px;
+    font-weight: 700;
+}}
+
+.model-version {{
+    color: #888;
+    font-size: 13px;
+    margin-top: 3px;
+}}
+
+.big-prediction {{
     font-size: 36px;
+    font-weight: 700;
+    margin-top: 22px;
+}}
+
+.big-percent {{
+    font-size: 28px;
     font-weight: 600;
+    margin-bottom: 20px;
+}}
+
+.up-text {{
+    color: #258a43;
+}}
+
+.down-text {{
+    color: #c33b32;
+}}
+
+.prob-row {{
+    display: grid;
+
+    grid-template-columns:
+        55px 1fr 55px;
+
+    align-items: center;
+
+    gap: 10px;
 
     margin-top: 10px;
 }}
 
-.bar {{
-    display: flex;
-
-    width: 100%;
-
-    height: 36px;
-
+.mini-bar {{
+    background: #e7e7e7;
+    height: 12px;
     border-radius: 8px;
-
     overflow: hidden;
-
-    margin-top: 20px;
 }}
 
-.up {{
-    width: {up_percent}%;
-
+.mini-up {{
+    height: 100%;
     background: #4caf50;
-
-    color: white;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
 }}
 
-.down {{
-    width: {down_percent}%;
-
+.mini-down {{
+    height: 100%;
     background: #e74c3c;
-
-    color: white;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
 }}
 
-.stats {{
-    display: grid;
-
-    grid-template-columns:
-        repeat(4, 1fr);
-
-    gap: 15px;
-}}
-
-.stat {{
-    background: #fafafa;
-
-    padding: 15px;
-
-    border-radius: 10px;
-}}
-
-.stat-value {{
-    font-size: 26px;
-    font-weight: 600;
-}}
-
-.stat-label {{
-    color: #777;
+.confidence {{
+    margin-top: 20px;
     font-size: 14px;
+    color: #666;
 }}
 
 .reason {{
+    margin-top: 16px;
+
+    padding-top: 16px;
+
+    border-top: 1px solid #e5e5e5;
+
+    color: #555;
+
+    font-size: 14px;
     line-height: 1.6;
+}}
 
-    color: #444;
+.scoreboard {{
+    display: grid;
 
-    margin-top: 20px;
+    grid-template-columns:
+        1fr 1fr;
+
+    gap: 20px;
+}}
+
+.score {{
+    background: #fafafa;
+    border-radius: 12px;
+    padding: 18px;
+}}
+
+.score-title {{
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 15px;
+}}
+
+.score-grid {{
+    display: grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap: 14px;
+}}
+
+.stat-value {{
+    font-size: 25px;
+    font-weight: 700;
+}}
+
+.stat-label {{
+    color: #888;
+    font-size: 12px;
 }}
 
 table {{
     width: 100%;
-
     border-collapse: collapse;
-
-    font-size: 14px;
 }}
 
 th {{
     text-align: left;
 
-    padding: 10px;
+    padding: 11px;
 
     border-bottom:
         2px solid #ddd;
 }}
 
 td {{
-    padding: 10px;
+    padding: 11px;
 
     border-bottom:
         1px solid #eee;
+}}
+
+.prediction-inline {{
+    font-weight: 600;
+    margin-right: 8px;
 }}
 
 .footer {{
@@ -502,27 +759,43 @@ td {{
 
     color: #999;
 
-    margin-top: 30px;
+    margin-top: 28px;
 
-    font-size: 13px;
+    font-size: 12px;
+
+    line-height: 1.6;
 }}
 
 @media
 (max-width: 700px) {{
 
     body {{
-        padding: 15px;
+        padding: 14px;
     }}
 
-    .stats {{
-        grid-template-columns:
-            repeat(2, 1fr);
+    .battle {{
+        grid-template-columns: 1fr;
+    }}
+
+    .scoreboard {{
+        grid-template-columns: 1fr;
+    }}
+
+    .battle-header {{
+        display: block;
+    }}
+
+    .actual {{
+        margin-top: 8px;
     }}
 
     table {{
-        font-size: 11px;
+        font-size: 12px;
     }}
 
+    .price {{
+        font-size: 36px;
+    }}
 }}
 
 </style>
@@ -536,15 +809,14 @@ td {{
 <h1>BTC Predictor</h1>
 
 <div class="subtitle">
-AI BTC-USD 1-hour direction experiment
+GPT vs Jev —
+BTC-USD 1-hour probability experiment
 </div>
 
 
 <div class="card">
 
-<div>
-Current BTC-USD
-</div>
+<div>Current BTC-USD</div>
 
 <div class="price">
 {price_text}
@@ -555,35 +827,32 @@ Current BTC-USD
 
 <div class="card">
 
-<h2>Latest prediction</h2>
+<div class="battle-header">
 
 <div>
-{latest_time}
+<h2>Latest Battle</h2>
+<div>{battle_time}</div>
 </div>
 
-<div>
-Model: {latest_model}
-</div>
-
-<div class="prediction">
-{prediction}
-</div>
-
-<div class="bar">
-
-<div class="up">
-UP {up_percent:.1f}%
-</div>
-
-<div class="down">
-DOWN {down_percent:.1f}%
+<div class="actual">
+Actual: {actual}
 </div>
 
 </div>
 
-<div class="reason">
-<strong>Reason</strong><br>
-{latest_reason}
+
+<div class="battle">
+
+{prediction_card(
+    gpt,
+    "GPT"
+)}
+
+{prediction_card(
+    jev,
+    "Jev"
+)}
+
 </div>
 
 </div>
@@ -591,60 +860,126 @@ DOWN {down_percent:.1f}%
 
 <div class="card">
 
-<h2>Performance</h2>
+<h2>Scoreboard</h2>
 
-<div class="stats">
+<div class="scoreboard">
 
-<div class="stat">
 
-<div class="stat-value">
-{stats["n"]}
+<div class="score">
+
+<div class="score-title">
+GPT
 </div>
 
+<div class="score-grid">
+
+<div>
+<div class="stat-value">
+{gpt_stats["wins"]}/{gpt_stats["n"]}
+</div>
 <div class="stat-label">
-Evaluated predictions
+Correct
+</div>
 </div>
 
-</div>
-
-
-<div class="stat">
-
+<div>
 <div class="stat-value">
-{accuracy_text}
+{stat_text(
+    gpt_stats["accuracy"],
+    "percent"
+)}
 </div>
-
 <div class="stat-label">
 Accuracy
 </div>
-
 </div>
 
-
-<div class="stat">
-
+<div>
 <div class="stat-value">
-{brier_text}
+{stat_text(
+    gpt_stats["brier"],
+    "brier"
+)}
 </div>
-
 <div class="stat-label">
 Brier score
 </div>
-
 </div>
 
-
-<div class="stat">
-
+<div>
 <div class="stat-value">
-{confidence_text}
+{stat_text(
+    gpt_stats["strength"],
+    "percent"
+)}
 </div>
-
 <div class="stat-label">
-Average confidence
+Avg prediction strength
+</div>
 </div>
 
 </div>
+
+</div>
+
+
+<div class="score">
+
+<div class="score-title">
+Jev
+</div>
+
+<div class="score-grid">
+
+<div>
+<div class="stat-value">
+{jev_stats["wins"]}/{jev_stats["n"]}
+</div>
+<div class="stat-label">
+Correct
+</div>
+</div>
+
+<div>
+<div class="stat-value">
+{stat_text(
+    jev_stats["accuracy"],
+    "percent"
+)}
+</div>
+<div class="stat-label">
+Accuracy
+</div>
+</div>
+
+<div>
+<div class="stat-value">
+{stat_text(
+    jev_stats["brier"],
+    "brier"
+)}
+</div>
+<div class="stat-label">
+Brier score
+</div>
+</div>
+
+<div>
+<div class="stat-value">
+{stat_text(
+    jev_stats["strength"],
+    "percent"
+)}
+</div>
+<div class="stat-label">
+Avg prediction strength
+</div>
+</div>
+
+</div>
+
+</div>
+
 
 </div>
 
@@ -653,21 +988,18 @@ Average confidence
 
 <div class="card">
 
-<h2>Recent predictions</h2>
+<h2>Recent Battles</h2>
 
 <table>
 
 <tr>
 <th>Time</th>
-<th>Model</th>
-<th>UP</th>
-<th>DOWN</th>
-<th>Prediction</th>
+<th>GPT</th>
+<th>Jev</th>
 <th>Actual</th>
-<th>Result</th>
 </tr>
 
-{table_rows}
+{recent_rows}
 
 </table>
 
@@ -678,8 +1010,11 @@ Average confidence
 
 BTC-USD market data: Coinbase<br>
 
-Predictions are experimental and
-are not financial advice.
+Predictions use only the stored market snapshot
+available at prediction time.<br>
+
+Experimental probability forecasting.
+Not financial advice.
 
 </div>
 
@@ -692,7 +1027,6 @@ are not financial advice.
 
 
 if __name__ == "__main__":
-
     app.run(
         host="127.0.0.1",
         port=8001,

@@ -133,6 +133,12 @@ def evaluate_prediction(row):
         candle[4]
     )
 
+    actual_return = (
+        (actual_close - old_close)
+         / old_close
+        * 100
+    )
+
     if actual_close > old_close:
         actual_direction = "UP"
 
@@ -167,12 +173,14 @@ def evaluate_prediction(row):
             UPDATE predictions
             SET
                 actual_close = ?,
+                actual_return = ?,
                 actual_direction = ?,
                 correct = ?,
                 evaluated_at = ?
             WHERE id = ?
         """, (
             actual_close,
+            actual_return,
             actual_direction,
             correct,
             evaluated_at,

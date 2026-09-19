@@ -59,6 +59,17 @@ def init_db():
         if not column_exists(
             conn,
             "predictions",
+            "actual_return",
+        ):
+            conn.execute("""
+                ALTER TABLE predictions
+                ADD COLUMN actual_return REAL
+            """)
+
+
+        if not column_exists(
+            conn,
+            "predictions",
             "predictor",
         ):
             conn.execute("""
