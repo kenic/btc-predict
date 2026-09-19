@@ -216,9 +216,16 @@ def main():
         created_at=created_at,
         candle_time=candle_time,
         candle_close=candle_close,
+
         model=MODEL,
+        predictor="openai",
+        model_version=MODEL,
+
         p_up=p_up,
         p_down=p_down,
+
+        confidence=None,
+
         reason=reason,
         context=snapshot,
     )
