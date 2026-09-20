@@ -20,6 +20,50 @@ HEADERS = {
     "User-Agent": "btc-predict-dashboard/0.2"
 }
 
+INITIAL_BALANCE = 10000.0
+
+
+def get_virtual_trading(predictor):
+    conn = connect()
+
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT
+                candle_time,
+                p_up,
+                p_down,
+                actual_return
+            FROM predictions
+            WHERE predictor = ?
+              AND actual_return IS NOT NULL
+            ORDER BY candle_time ASC
+        """, (predictor,)).fetchall()
+
+    balance = INITIAL_BALANCE
+    trades = 0
+
+    for row in rows:
+        p_up = float(row["p_up"])
+        actual_return = float(row["actual_return"]) / 100.0
+
+        # +1.0 = 100% long
+        # -1.0 = 100% short
+        #  0.0 = no position
+        position = 2.0 * p_up - 1.0
+
+        balance *= 1.0 + position * actual_return
+        trades += 1
+
+    total_return = (
+        (balance / INITIAL_BALANCE) - 1.0
+    ) * 100.0
+
+    return {
+        "initial_balance": INITIAL_BALANCE,
+        "balance": balance,
+        "return": total_return,
+        "trades": trades,
+    }
 
 def connect():
     conn = sqlite3.connect(DB_PATH)
@@ -403,6 +447,10 @@ def index():
     jev_stats = get_model_statistics(
         "jev"
     )
+
+    # Virtual Trading
+    gpt_trading = get_virtual_trading("openai")
+    jev_trading = get_virtual_trading("jev")
 
     battles = get_recent_battles(
         limit=12
@@ -985,6 +1033,57 @@ Avg prediction strength
 
 </div>
 
+<div class="card">
+
+<h2>Virtual Trading</h2>
+
+<div class="scoreboard">
+
+<div class="score">
+
+<div class="score-title">
+GPT
+</div>
+
+<div class="stat-value">
+¥{gpt_trading["balance"]:,.0f}
+</div>
+
+<div class="stat-label">
+{gpt_trading["return"]:+.2f}% /
+{gpt_trading["trades"]} trades
+</div>
+
+</div>
+
+
+<div class="score">
+
+<div class="score-title">
+Jev
+</div>
+
+<div class="stat-value">
+¥{jev_trading["balance"]:,.0f}
+</div>
+
+<div class="stat-label">
+{jev_trading["return"]:+.2f}% /
+{jev_trading["trades"]} trades
+</div>
+
+</div>
+
+</div>
+
+<div class="stat-label"
+     style="margin-top: 14px;">
+Initial balance: ¥10,000 /
+Position size = 2 × P(UP) − 1 /
+No fees or spread
+</div>
+
+</div>
 
 <div class="card">
 
