@@ -17,15 +17,22 @@ COINBASE_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "btc-predict-dashboard/0.2"
+    "User-Agent": "btc-predict-dashboard/0.3"
 }
 
 INITIAL_BALANCE = 10000.0
+CURRENT_PHASE = "phase3"
+MARKET_DB_PATH = Path(__file__).parent / "market.db"
+PHASE3_SUBTITLE = "Market microstructure: 1h + 15m + 5m + order book + trade flow"
 
 
-def get_virtual_trading(predictor):
-    conn = connect()
+def connect():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
+
+def get_virtual_trading(predictor, phase):
     with connect() as conn:
         rows = conn.execute("""
             SELECT
@@ -35,23 +42,33 @@ def get_virtual_trading(predictor):
                 actual_return
             FROM predictions
             WHERE predictor = ?
+              AND phase = ?
               AND actual_return IS NOT NULL
             ORDER BY candle_time ASC
-        """, (predictor,)).fetchall()
+        """, (
+            predictor,
+            phase,
+        )).fetchall()
 
     balance = INITIAL_BALANCE
     trades = 0
 
     for row in rows:
         p_up = float(row["p_up"])
-        actual_return = float(row["actual_return"]) / 100.0
+
+        actual_return = (
+            float(row["actual_return"]) / 100.0
+        )
 
         # +1.0 = 100% long
         # -1.0 = 100% short
         #  0.0 = no position
         position = 2.0 * p_up - 1.0
 
-        balance *= 1.0 + position * actual_return
+        balance *= (
+            1.0 + position * actual_return
+        )
+
         trades += 1
 
     total_return = (
@@ -64,11 +81,6 @@ def get_virtual_trading(predictor):
         "return": total_return,
         "trades": trades,
     }
-
-def connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def get_btc_price():
@@ -155,7 +167,7 @@ def get_latest_battle():
     return gpt, jev
 
 
-def get_model_statistics(predictor):
+def get_model_statistics(predictor, phase):
     with connect() as conn:
         rows = conn.execute("""
             SELECT
@@ -165,9 +177,11 @@ def get_model_statistics(predictor):
                 correct
             FROM predictions
             WHERE predictor = ?
+              AND phase = ?
               AND actual_direction IN ('UP', 'DOWN')
         """, (
             predictor,
+            phase,
         )).fetchall()
 
     n = len(rows)
@@ -335,6 +349,24 @@ def stat_text(value, kind):
     return str(value)
 
 
+def phase_text(row):
+    if row is None:
+        return "-"
+
+    phase = row["phase"]
+
+    if phase == "phase1":
+        return "Phase 1"
+
+    if phase == "phase2":
+        return "Phase 2"
+
+    if phase == "phase3":
+        return "Phase 3"
+
+    return html.escape(phase or "-")
+
+
 def prediction_card(row, title):
     if row is None:
         return """
@@ -366,6 +398,13 @@ def prediction_card(row, title):
     else:
         confidence_text = (
             f"{float(confidence) * 100:.1f}%"
+        )
+
+    confidence_html = ""
+    if row["predictor"] == "jev":
+        confidence_html = (
+            '<div class="confidence">'
+            f'Jev confidence: {confidence_text}</div>'
         )
 
     predicted_class = (
@@ -415,15 +454,254 @@ def prediction_card(row, title):
             <strong>{p_down * 100:.1f}%</strong>
         </div>
 
-        <div class="confidence">
-            Jev confidence:
-            {confidence_text}
-        </div>
+        {confidence_html}
 
         <div class="reason">
             {reason}
         </div>
 
+    </div>
+    """
+
+
+def scoreboard_html(
+    title,
+    subtitle,
+    gpt_stats,
+    jev_stats,
+):
+    return f"""
+    <div class="card">
+
+    <h2>{html.escape(title)}</h2>
+
+    <div class="section-subtitle">
+        {html.escape(subtitle)}
+    </div>
+
+    <div class="scoreboard">
+
+    <div class="score">
+
+    <div class="score-title">
+    GPT
+    </div>
+
+    <div class="score-grid">
+
+    <div>
+    <div class="stat-value">
+    {gpt_stats["wins"]}/{gpt_stats["n"]}
+    </div>
+    <div class="stat-label">
+    Correct
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        gpt_stats["accuracy"],
+        "percent"
+    )}
+    </div>
+    <div class="stat-label">
+    Accuracy
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        gpt_stats["brier"],
+        "brier"
+    )}
+    </div>
+    <div class="stat-label">
+    Brier score
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        gpt_stats["strength"],
+        "percent"
+    )}
+    </div>
+    <div class="stat-label">
+    Avg prediction strength
+    </div>
+    </div>
+
+    </div>
+    </div>
+
+    <div class="score">
+
+    <div class="score-title">
+    Jev
+    </div>
+
+    <div class="score-grid">
+
+    <div>
+    <div class="stat-value">
+    {jev_stats["wins"]}/{jev_stats["n"]}
+    </div>
+    <div class="stat-label">
+    Correct
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        jev_stats["accuracy"],
+        "percent"
+    )}
+    </div>
+    <div class="stat-label">
+    Accuracy
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        jev_stats["brier"],
+        "brier"
+    )}
+    </div>
+    <div class="stat-label">
+    Brier score
+    </div>
+    </div>
+
+    <div>
+    <div class="stat-value">
+    {stat_text(
+        jev_stats["strength"],
+        "percent"
+    )}
+    </div>
+    <div class="stat-label">
+    Avg prediction strength
+    </div>
+    </div>
+
+    </div>
+    </div>
+
+    </div>
+    </div>
+    """
+
+
+def get_latest_microstructure():
+    """Recompute windows at the latest Phase 3 prediction cutoff, read-only.
+
+    candle_time is the START of the reference hourly candle, so the
+    prediction cutoff is candle_time + 3600. Windows match microstructure.py:
+    (cutoff - minutes * 60, cutoff]. This is a database reconstruction,
+    not necessarily the exact stored input if trades arrived late.
+    """
+    result = {"cutoff": None, "windows": [], "status": ""}
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT MAX(candle_time) AS candle_time FROM predictions "
+            "WHERE phase = ? AND predictor IN ('openai', 'jev')",
+            (CURRENT_PHASE,),
+        ).fetchone()
+    if row["candle_time"] is None:
+        result["status"] = "No Phase 3 predictions yet."
+        return result
+
+    cutoff = int(row["candle_time"]) + 3600
+    result["cutoff"] = cutoff
+    conn = None
+    try:
+        # mode=ro prevents accidental creation of an empty market.db.
+        conn = sqlite3.connect(
+            MARKET_DB_PATH.resolve().as_uri() + "?mode=ro",
+            uri=True, timeout=2,
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN")
+        for minutes in (1, 5, 15, 60):
+            bounds = (cutoff - minutes * 60, cutoff)
+            book = conn.execute("""
+                SELECT COUNT(*) AS samples,
+                       AVG(top5_imbalance) AS imb5,
+                       AVG(top10_imbalance) AS imb10,
+                       AVG(top20_imbalance) AS imb20
+                FROM orderbook_samples
+                WHERE timestamp > ? AND timestamp <= ?
+            """, bounds).fetchone()
+            flow = conn.execute("""
+                SELECT COUNT(*) AS trades,
+                       SUM(CASE WHEN aggressor_side = 'buy'
+                                THEN size ELSE 0 END) AS buy_btc,
+                       SUM(CASE WHEN aggressor_side = 'sell'
+                                THEN size ELSE 0 END) AS sell_btc
+                FROM trades
+                WHERE timestamp > ? AND timestamp <= ?
+            """, bounds).fetchone()
+            total = (flow["buy_btc"] or 0) + (flow["sell_btc"] or 0)
+            ratio = None
+            if flow["trades"]:
+                ratio = flow["buy_btc"] / total if total > 0 else 0.5
+            result["windows"].append({
+                "minutes": minutes, **dict(book),
+                "trades": flow["trades"], "buy_ratio": ratio,
+            })
+    except sqlite3.Error:
+        app.logger.warning("Market microstructure unavailable", exc_info=True)
+        result["windows"] = []
+        result["status"] = "Market data unavailable."
+    finally:
+        if conn is not None:
+            conn.close()
+    return result
+
+
+def microstructure_html(data):
+    rows = ""
+    for window in data["windows"]:
+        imbalances = "".join(
+            f"<td>{window[key]:.3f}</td>"
+            if window[key] is not None else "<td>—</td>"
+            for key in ("imb5", "imb10", "imb20")
+        )
+        ratio = window["buy_ratio"]
+        ratio_text = f"{ratio * 100:.1f}%" if ratio is not None else "—"
+        rows += (
+            f'<tr><td>{window["minutes"]}m</td>{imbalances}'
+            f'<td>{ratio_text}</td><td>{window["samples"]}</td>'
+            f'<td>{window["trades"]}</td></tr>'
+        )
+    status = html.escape(data["status"])
+    content = f'<div class="stat-label">{status}</div>' if status else f"""
+        <div style="overflow-x: auto;">
+        <table>
+        <tr><th>Window</th><th>Top 5</th><th>Top 10</th><th>Top 20</th>
+        <th>Buy ratio</th><th>Samples</th><th>Trades</th></tr>
+        {rows}
+        </table>
+        </div>
+    """
+    return f"""
+    <div class="card">
+        <h2>Latest Market Microstructure</h2>
+        <div class="section-subtitle">
+            Phase 3 prediction cutoff: {format_time(data["cutoff"])}<br>
+            Order-book imbalance (window average) / Trade-flow buy ratio (BTC volume)
+        </div>
+        {content}
+        <div class="stat-label" style="margin-top: 14px;">
+            Reconstructed from market.db at the cutoff; late-arriving trades
+            may differ from the stored prediction input. — means no data.
+        </div>
     </div>
     """
 
@@ -440,17 +718,48 @@ def index():
 
     gpt, jev = get_latest_battle()
 
-    gpt_stats = get_model_statistics(
-        "openai"
+    #
+    # Phase 3: current experiment
+    #
+
+    gpt_stats_phase3 = get_model_statistics("openai", CURRENT_PHASE)
+    jev_stats_phase3 = get_model_statistics("jev", CURRENT_PHASE)
+    microstructure = microstructure_html(get_latest_microstructure())
+
+    # Phase 2: completed experiment
+    gpt_stats_phase2 = get_model_statistics(
+        "openai",
+        "phase2",
     )
 
-    jev_stats = get_model_statistics(
-        "jev"
+    jev_stats_phase2 = get_model_statistics(
+        "jev",
+        "phase2",
     )
 
-    # Virtual Trading
-    gpt_trading = get_virtual_trading("openai")
-    jev_trading = get_virtual_trading("jev")
+    gpt_trading = get_virtual_trading(
+        "openai",
+        CURRENT_PHASE,
+    )
+
+    jev_trading = get_virtual_trading(
+        "jev",
+        CURRENT_PHASE,
+    )
+
+    #
+    # Phase 1: completed experiment
+    #
+
+    gpt_stats_phase1 = get_model_statistics(
+        "openai",
+        "phase1",
+    )
+
+    jev_stats_phase1 = get_model_statistics(
+        "jev",
+        "phase1",
+    )
 
     battles = get_recent_battles(
         limit=12
@@ -461,6 +770,8 @@ def index():
             gpt["candle_time"]
         )
 
+        battle_phase = phase_text(gpt)
+
         actual = (
             gpt["actual_direction"]
             or "Waiting"
@@ -468,6 +779,7 @@ def index():
 
     else:
         battle_time = "-"
+        battle_phase = "-"
         actual = "Waiting"
 
     recent_rows = ""
@@ -493,11 +805,11 @@ def index():
         actual_direction = (
             battle_gpt["actual_direction"]
             or "-"
-        )      
+        )
 
         actual_return = (
             battle_gpt["actual_return"]
-        )   
+        )
 
         if actual_return is None:
             actual_text = "-"
@@ -505,13 +817,16 @@ def index():
             actual_text = (
                 f"{actual_direction} "
                 f"{float(actual_return):+.2f}%"
-        )
-
+            )
 
         recent_rows += f"""
         <tr>
             <td>
                 {format_time(candle_time)}
+            </td>
+
+            <td>
+                {phase_text(battle_gpt)}
             </td>
 
             <td>
@@ -535,6 +850,27 @@ def index():
             </td>
         </tr>
         """
+
+    phase3_scoreboard = scoreboard_html(
+        "Phase 3 Scoreboard",
+        PHASE3_SUBTITLE,
+        gpt_stats_phase3,
+        jev_stats_phase3,
+    )
+
+    phase2_scoreboard = scoreboard_html(
+        "Phase 2 Final Results",
+        "Multi-timeframe input: 1h + 15m + 5m",
+        gpt_stats_phase2,
+        jev_stats_phase2,
+    )
+
+    phase1_scoreboard = scoreboard_html(
+        "Phase 1 Final Results",
+        "Completed experiment: 1-hour indicators only",
+        gpt_stats_phase1,
+        jev_stats_phase1,
+    )
 
     return f"""
 <!doctype html>
@@ -604,6 +940,24 @@ h2 {{
 .subtitle {{
     color: #777;
     margin-bottom: 28px;
+}}
+
+.section-subtitle {{
+    color: #777;
+    font-size: 14px;
+    margin-top: -8px;
+    margin-bottom: 20px;
+}}
+
+.phase-badge {{
+    display: inline-block;
+    margin-top: 6px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #eee;
+    color: #666;
+    font-size: 12px;
+    font-weight: 600;
 }}
 
 .card {{
@@ -880,6 +1234,9 @@ BTC-USD 1-hour probability experiment
 <div>
 <h2>Latest Battle</h2>
 <div>{battle_time}</div>
+<div class="phase-badge">
+{battle_phase}
+</div>
 </div>
 
 <div class="actual">
@@ -906,136 +1263,17 @@ Actual: {actual}
 </div>
 
 
-<div class="card">
+{phase3_scoreboard}
 
-<h2>Scoreboard</h2>
-
-<div class="scoreboard">
-
-
-<div class="score">
-
-<div class="score-title">
-GPT
-</div>
-
-<div class="score-grid">
-
-<div>
-<div class="stat-value">
-{gpt_stats["wins"]}/{gpt_stats["n"]}
-</div>
-<div class="stat-label">
-Correct
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    gpt_stats["accuracy"],
-    "percent"
-)}
-</div>
-<div class="stat-label">
-Accuracy
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    gpt_stats["brier"],
-    "brier"
-)}
-</div>
-<div class="stat-label">
-Brier score
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    gpt_stats["strength"],
-    "percent"
-)}
-</div>
-<div class="stat-label">
-Avg prediction strength
-</div>
-</div>
-
-</div>
-
-</div>
-
-
-<div class="score">
-
-<div class="score-title">
-Jev
-</div>
-
-<div class="score-grid">
-
-<div>
-<div class="stat-value">
-{jev_stats["wins"]}/{jev_stats["n"]}
-</div>
-<div class="stat-label">
-Correct
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    jev_stats["accuracy"],
-    "percent"
-)}
-</div>
-<div class="stat-label">
-Accuracy
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    jev_stats["brier"],
-    "brier"
-)}
-</div>
-<div class="stat-label">
-Brier score
-</div>
-</div>
-
-<div>
-<div class="stat-value">
-{stat_text(
-    jev_stats["strength"],
-    "percent"
-)}
-</div>
-<div class="stat-label">
-Avg prediction strength
-</div>
-</div>
-
-</div>
-
-</div>
-
-
-</div>
-
-</div>
+{microstructure}
 
 <div class="card">
 
-<h2>Virtual Trading</h2>
+<h2>Phase 3 Virtual Trading</h2>
+
+<div class="section-subtitle">
+{PHASE3_SUBTITLE}
+</div>
 
 <div class="scoreboard">
 
@@ -1085,6 +1323,12 @@ No fees or spread
 
 </div>
 
+
+{phase2_scoreboard}
+
+{phase1_scoreboard}
+
+
 <div class="card">
 
 <h2>Recent Battles</h2>
@@ -1093,6 +1337,7 @@ No fees or spread
 
 <tr>
 <th>Time</th>
+<th>Phase</th>
 <th>GPT</th>
 <th>Jev</th>
 <th>Actual</th>
@@ -1108,6 +1353,13 @@ No fees or spread
 <div class="footer">
 
 BTC-USD market data: Coinbase<br>
+
+Phase 1: 1-hour technical indicators only.<br>
+
+Phase 2: multi-timeframe input
+(1h + 15m + 5m).<br>
+
+Phase 3: 1h + 15m + 5m + order book + trade flow.<br>
 
 Predictions use only the stored market snapshot
 available at prediction time.<br>

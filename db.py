@@ -48,6 +48,12 @@ def init_db():
 
                 evaluated_at TEXT,
 
+                actual_return REAL,
+                predictor TEXT,
+                model_version TEXT,
+                confidence REAL,
+                phase TEXT,
+
                 UNIQUE(candle_time, model)
             )
         """)
@@ -65,7 +71,6 @@ def init_db():
                 ALTER TABLE predictions
                 ADD COLUMN actual_return REAL
             """)
-
 
         if not column_exists(
             conn,
@@ -95,6 +100,16 @@ def init_db():
             conn.execute("""
                 ALTER TABLE predictions
                 ADD COLUMN confidence REAL
+            """)
+
+        if not column_exists(
+            conn,
+            "predictions",
+            "phase",
+        ):
+            conn.execute("""
+                ALTER TABLE predictions
+                ADD COLUMN phase TEXT
             """)
 
         conn.commit()
@@ -131,6 +146,7 @@ def save_prediction(
     predictor=None,
     model_version=None,
     confidence=None,
+    phase="phase2",
 ):
     target_candle_time = (
         candle_time + 3600
@@ -155,14 +171,15 @@ def save_prediction(
                 reason,
                 context,
 
-                target_candle_time
+                target_candle_time,
+                phase
             )
             VALUES (
                 ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
                 ?, ?,
-                ?
+                ?, ?
             )
         """, (
             created_at,
@@ -181,6 +198,7 @@ def save_prediction(
             context,
 
             target_candle_time,
+            phase,
         ))
 
         conn.commit()
