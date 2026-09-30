@@ -41,7 +41,7 @@ def init_schema():
 
 def assert_phase3_closed(c):
     rows = c.execute("SELECT predictor, count(*), sum(evaluated_at IS NOT NULL) FROM predictions WHERE phase='phase3' GROUP BY predictor").fetchall()
-    if sorted(rows) != [('jev', 48, 48), ('openai', 48, 48)]:
+    if sorted(tuple(row) for row in rows) != [('jev', 48, 48), ('openai', 48, 48)]:
         raise RuntimeError("Phase 3 must contain exactly 48 evaluated predictions for each model")
     pairs = c.execute("SELECT candle_time FROM predictions WHERE phase='phase3' GROUP BY candle_time HAVING count(*)=2 AND count(DISTINCT predictor)=2").fetchall()
     if len(pairs) != 48:
