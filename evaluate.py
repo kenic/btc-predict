@@ -334,6 +334,9 @@ def show_statistics():
 
 def main():
 
+    from evaluate_volatility import evaluate_all
+    evaluate_all()
+
     rows = get_pending_predictions()
 
     if not rows:

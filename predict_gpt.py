@@ -250,7 +250,7 @@ MARKET DATA:
     return json.loads(text)
 
 
-def main():
+def phase3_main():
     load_dotenv()
 
     init_db()
@@ -512,6 +512,11 @@ def main():
         f"Saved prediction id="
         f"{prediction_id}"
     )
+
+
+def main():
+    from phase4_runner import run
+    run("openai")
 
 
 if __name__ == "__main__":

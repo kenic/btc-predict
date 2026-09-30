@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "phase": "phase4",
+  "target": "next_1h_realized_volatility",
+  "rv_definition": "100 * sqrt(sum(log(C_i / C_(i-1))^2)), 12 consecutive 5m returns",
+  "quiet_upper": 0.22742560978910695,
+  "active_lower": 0.37066415640951506,
+  "quantiles": [
+    0.3333333333333333,
+    0.6666666666666666
+  ],
+  "quantile_method": "linear interpolation (n-1)*q",
+  "calibration_start": 1789567200,
+  "calibration_end": 1790776800,
+  "historical_hours": 336,
+  "excluded_hours": [],
+  "prediction_limit": 48,
+  "tie_order": [
+    "QUIET",
+    "NORMAL",
+    "ACTIVE"
+  ],
+  "source": "Coinbase BTC-USD 5m closes",
+  "historical_class_counts": {
+    "QUIET": 112,
+    "NORMAL": 112,
+    "ACTIVE": 112
+  },
+  "majority_class": "QUIET",
+  "history_sha256": "4c1e5f717a4b061465a855ec4d12c30e4617b7ff0311b1745d15625b29176a63"
+}

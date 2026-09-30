@@ -35,3 +35,7 @@ This is an experimental project, not financial advice.
 実験サイト: https://btc.kenic.jp/
 
 実験目的のプロジェクトであり、投資助言ではありません。
+
+## Phase 4
+
+Next-hour realized volatility classification is implemented; see [PHASE4.md](PHASE4.md) for frozen thresholds, closure/start guards, views and rollback. Phase 1–3 direction data remains intact.

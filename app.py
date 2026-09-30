@@ -1,10 +1,11 @@
 import html
+import math
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 
 import requests
-from flask import Flask
+from flask import Flask, abort, request
 
 
 app = Flask(__name__)
@@ -706,7 +707,7 @@ def microstructure_html(data):
     """
 
 
-@app.route("/")
+@app.route("/direction/")
 def index():
 
     try:
@@ -1209,6 +1210,7 @@ td {{
 <div class="container">
 
 <h1>BTC Predictor</h1>
+<p><a href="/analyze/">Analysis →</a></p>
 
 <div class="subtitle">
 GPT vs Jev —
@@ -1375,6 +1377,223 @@ Not financial advice.
 
 </html>
 """
+
+
+# Analysis uses the stored 0..1 probability scale, matching the dashboard.
+ANALYSIS_PHASES = ("phase1", "phase2", "phase3")
+ANALYSIS_MODELS = (("openai", "GPT"), ("jev", "Jev"))
+ANALYSIS_BUCKETS = ((.50, .55), (.55, .60), (.60, .70),
+                    (.70, .80), (.80, .90), (.90, 1.0))
+
+
+def analysis_number(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and 0 <= number <= 1 else None
+
+
+def analysis_summary(rows):
+    n = len(rows)
+    correct = sum(row["correct"] for row in rows)
+    return {
+        "n": n, "correct": correct,
+        "accuracy": correct / n if n else None,
+        "brier": math.fsum(row["brier"] for row in rows) / n if n else None,
+        "strength": math.fsum(row["strength"] for row in rows) / n if n else None,
+    }
+
+
+def get_analysis(phase):
+    # One read-only snapshot per request; never create or modify btc.db.
+    conn = sqlite3.connect(DB_PATH.resolve().as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        sql = """
+            SELECT phase, predictor, p_up, p_down, actual_direction, correct,
+                   confidence
+            FROM predictions
+            WHERE actual_direction IN ('UP', 'DOWN')
+              AND predictor IN ('openai', 'jev')
+              AND phase IN ('phase1', 'phase2', 'phase3')
+        """
+        params = ()
+        if phase != "all":
+            sql += " AND phase = ?"
+            params = (phase,)
+        raw = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    rows, skipped, fallback_correct = [], 0, 0
+    for row in raw:
+        up, down = analysis_number(row["p_up"]), analysis_number(row["p_down"])
+        if up is None or down is None or not math.isclose(up + down, 1.0, abs_tol=1e-6):
+            skipped += 1
+            continue
+        correct = row["correct"]
+        if correct not in (0, 1):
+            # Same tie rule as direction(): UP when probabilities are equal.
+            correct = int(("UP" if up >= down else "DOWN") == row["actual_direction"])
+            fallback_correct += 1
+        rows.append({
+            "phase": row["phase"], "predictor": row["predictor"],
+            "correct": int(correct), "strength": max(up, down),
+            "brier": (up - int(row["actual_direction"] == "UP")) ** 2,
+            "margin": abs(up - down),
+            "confidence": analysis_number(row["confidence"]),
+        })
+
+    phases = ANALYSIS_PHASES if phase == "all" else (phase,)
+    comparison = [
+        (p, label, analysis_summary([r for r in rows if r["phase"] == p and r["predictor"] == model]))
+        for p in phases for model, label in ANALYSIS_MODELS
+    ]
+    calibration, thresholds = {}, {}
+    for model, label in ANALYSIS_MODELS:
+        selected = [r for r in rows if r["predictor"] == model]
+        calibration[label] = [
+            (lo, hi, analysis_summary([
+                r for r in selected if lo <= r["strength"]
+                and (r["strength"] < hi or hi == 1.0)
+            ])) for lo, hi in ANALYSIS_BUCKETS
+        ]
+        thresholds[label] = [
+            (threshold, analysis_summary([r for r in selected if r["strength"] >= threshold]))
+            for threshold in (.50, .55, .60, .70, .80, .90)
+        ]
+
+    jev = [r for r in rows if r["predictor"] == "jev"]
+    pairs = [r for r in jev if r["confidence"] is not None]
+    n = len(pairs)
+    correlation, mad = None, None
+    if n:
+        mx = math.fsum(r["margin"] for r in pairs) / n
+        my = math.fsum(r["confidence"] for r in pairs) / n
+        mad = math.fsum(abs(r["margin"] - r["confidence"]) for r in pairs) / n
+        xx = math.fsum((r["margin"] - mx) ** 2 for r in pairs)
+        yy = math.fsum((r["confidence"] - my) ** 2 for r in pairs)
+        if n >= 2 and xx > 0 and yy > 0:
+            xy = math.fsum((r["margin"] - mx) * (r["confidence"] - my) for r in pairs)
+            correlation = max(-1.0, min(1.0, xy / math.sqrt(xx * yy)))
+    margin_groups = []
+    for i in range(10):
+        group = [r for r in pairs if i / 10 <= r["margin"]
+                 and (r["margin"] < (i + 1) / 10 or i == 9)]
+        size = len(group)
+        margin_groups.append((i, size,
+            math.fsum(r["margin"] for r in group) / size if size else None,
+            math.fsum(r["confidence"] for r in group) / size if size else None))
+    return dict(comparison=comparison, calibration=calibration, thresholds=thresholds,
+                pair_n=n, correlation=correlation, mad=mad, margin_groups=margin_groups,
+                missing_confidence=len(jev) - n, skipped=skipped,
+                fallback_correct=fallback_correct)
+
+
+def analysis_table(headers, rows):
+    head = "".join(f'<th scope="col">{html.escape(h)}</th>' for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows)
+    return f'<div class="table-scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
+def analysis_bar(stats):
+    if not stats["n"]:
+        return "—"
+    actual = stats["accuracy"] * 100
+    ideal = stats["strength"] * 100
+    return (f'<div class="bar" role="img" aria-label="Accuracy {actual:.1f}%, '
+            f'ideal {ideal:.1f}%"><span style="width:{actual:.4f}%"></span>'
+            f'<i style="left:{ideal:.4f}%"></i></div>')
+
+
+@app.route("/analyze/")
+def analyze():
+    if request.args.get("phase") == "phase4":
+        from phase4_views import page
+        response = app.make_response(page(analysis=True))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    phase = request.args.get("phase", "all")
+    if phase not in ("all",) + ANALYSIS_PHASES:
+        abort(400, description="phase must be all, phase1, phase2 or phase3")
+    data = get_analysis(phase)
+    filters = " ".join(
+        f'<a href="?phase={key}"' + (' aria-current="page"' if key == phase else '') + f'>{label}</a>'
+        for key, label in (("phase4", "Phase 4 volatility"), ("all", "All direction phases"), ("phase1", "Phase 1"),
+                           ("phase2", "Phase 2"), ("phase3", "Phase 3"))
+    )
+    comparison = analysis_table(
+        ["Phase", "Model", "N", "Correct", "Accuracy", "Brier score", "Avg prediction strength"],
+        [(f'Phase {p[-1]}', label, s["n"], s["correct"], stat_text(s["accuracy"], "percent"),
+          stat_text(s["brier"], "brier"), stat_text(s["strength"], "percent"))
+         for p, label, s in data["comparison"]])
+    calibration, thresholds = "", ""
+    for _, label in ANALYSIS_MODELS:
+        calibration += f"<h3>{label}</h3>" + analysis_table(
+            ["Strength bucket", "N", "Accuracy", "Ideal (mean strength)", "Actual / ideal · 0–100%"],
+            [(f'{lo:.0%}–{hi:.0%}', s["n"], stat_text(s["accuracy"], "percent"),
+              stat_text(s["strength"], "percent"), analysis_bar(s))
+             for lo, hi, s in data["calibration"][label]])
+        thresholds += f"<h3>{label}</h3>" + analysis_table(
+            ["Minimum strength", "N", "Accuracy", "Brier score"],
+            [(f'≥ {threshold:.0%}', s["n"], stat_text(s["accuracy"], "percent"),
+              stat_text(s["brier"], "brier")) for threshold, s in data["thresholds"][label]])
+    confidence_table = analysis_table(
+        ["Probability margin", "N", "Mean margin", "Mean Jev confidence"],
+        [(f'{i * 10}–{(i + 1) * 10}%', n, stat_text(margin, "percent"), stat_text(conf, "percent"))
+         for i, n, margin, conf in data["margin_groups"]])
+    r_text = f'{data["correlation"]:.6f}' if data["correlation"] is not None else "— (fewer than 2 pairs or zero variance)"
+    mad_text = f'{data["mad"] * 100:.3f} percentage points' if data["mad"] is not None else "—"
+    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC Predictor — Analysis</title>
+<style>
+* {{box-sizing:border-box}} body {{margin:0;padding:30px;background:#f5f5f7;color:#222;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+main {{max-width:1100px;margin:auto}} h1 {{margin-bottom:8px}} h2 {{margin-top:0}}
+a {{color:#245bb2}} p {{line-height:1.6}} .muted {{color:#666;font-size:14px}}
+nav {{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0}} nav a {{padding:10px 16px;background:white;border:1px solid #ddd;border-radius:24px;text-decoration:none}}
+nav a[aria-current] {{background:#245bb2;color:white;border-color:#245bb2}}
+section {{background:white;border-radius:16px;padding:24px;margin-bottom:22px;box-shadow:0 2px 12px #0000000f}}
+.table-scroll {{overflow-x:auto}} table {{width:100%;border-collapse:collapse;font-size:14px}} th,td {{padding:12px;text-align:right;border-bottom:1px solid #eee;white-space:nowrap}} th {{color:#555}} th:first-child,td:first-child {{text-align:left}}
+.bar {{position:relative;width:190px;height:16px;background:#edf0f5;border-radius:3px}} .bar span {{display:block;height:100%;background:#487bd1;border-radius:3px}} .bar i {{position:absolute;top:-3px;height:22px;width:2px;background:#222;transform:translateX(-1px)}}
+.metrics {{display:flex;flex-wrap:wrap;gap:28px}} .metrics strong {{display:block;font-size:22px;margin:8px 0}}
+@media(max-width:600px) {{body {{padding:16px}} section {{padding:16px}} th,td {{padding:9px}}}}
+</style></head><body><main>
+<a href="/">← Dashboard</a><h1>BTC Predictor — Analysis</h1>
+<p class="muted">Recomputed from btc.db on every request · {updated}</p>
+<nav aria-label="Phase filter">{filters}</nav>
+<p class="muted">The phase filter applies to all sections. Only evaluated UP/DOWN rows are included.
+Strength = max(p_up, p_down). Accuracy uses stored correct (missing values are recomputed; ties predict UP).
+Brier = mean((p_up − outcome)²), where UP = 1 and DOWN = 0; lower is better (50/50 baseline: 0.25).
+Empty groups show —. Invalid probability rows excluded: {data['skipped']}; correct values recomputed: {data['fallback_correct']}.</p>
+<section><h2>Phase comparison</h2>{comparison}</section>
+<section><h2>Calibration analysis</h2><p class="muted">Blue bar: actual accuracy. Black marker: ideal accuracy, equal to the mean prediction strength in that bucket.
+Buckets include their lower bound and exclude their upper bound, except 100% is included in the last bucket.</p>{calibration}</section>
+<section><h2>Threshold analysis</h2><p class="muted">Keep predictions whose strength is at least the threshold (not Jev's separate confidence field).
+Compare accuracy and Brier together with N; higher thresholds leave fewer observations.
+These are historical subsets, not evidence of future trading profit.</p>{thresholds}</section>
+<section><h2>Jev confidence investigation</h2>
+<p class="muted">Probability margin = abs(p_up − p_down). Evaluated Jev rows with valid confidence only.
+Missing or invalid confidence excluded: {data['missing_confidence']}.</p>
+<div class="metrics"><div>Paired N<strong>{data['pair_n']}</strong></div><div>Pearson r<strong>{r_text}</strong></div>
+<div>Mean absolute difference<strong>{mad_text}</strong></div></div>
+<p class="muted">If confidence repeats the probability margin, r approaches 1 and the absolute difference approaches 0.
+The table groups pairs by margin (lower bound included; 100% included in the last group).</p>{confidence_table}</section>
+</main></body></html>"""
+    response = app.make_response(page)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/")
+def volatility_dashboard():
+    from phase4_views import page
+    response = app.make_response(page())
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 if __name__ == "__main__":
