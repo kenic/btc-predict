@@ -46,7 +46,8 @@ It is safe to retry closure. Enabling is separate and makes no model call.
 Restart the hourly scheduler only after closure and enablement succeed.
 The first new prediction must be at or after the frozen calibration end;
 more than 10 minutes after its hourly cutoff is rejected to avoid hindsight.
-The runner stops each model after 48 Phase 4 predictions.
+The original design stops each model after 48 Phase 4 predictions; the
+continuation policy below preserves that cohort and adds a second 48.
 
 `predict_gpt.py` and `predict_jev.py` now enter the Phase 4 runner. The original
 Phase 3 functions remain for reference, but the normal entry points cannot
@@ -95,3 +96,81 @@ Run `python -m unittest test_phase4 -v`, compile all `.py` files, and
 `bash -n run_hourly.sh`. Dashboard routes are checked with Flask's test client.
 Model API calls are not made while preparing; real model integration requires
 the configured production SDK versions and a running market collector.
+
+## Phase 4a + 4b continuation deployment
+
+The original `prediction_limit: 48` and frozen config hash remain unchanged.
+A separate continuation policy allows 96 saved predictions **per predictor**:
+Phase 4a is ordinal 1–48, Phase 4b is 49–96. Combined scores are descriptive;
+4b is an additional replication decided after observing 4a interim results.
+Ordinals include pending evaluations. They use each model's chronological
+saved targets, matching the original per-model limit. If a model misses an
+hour, it can finish later than the other model; no late backfill is allowed.
+Neither model's success advances the other model's count. The cadence remains
+unchanged. The 96th prediction still needs evaluation on the following run;
+keep the hourly scheduler running after prediction collection ends.
+
+`phase4_segments` is an additive read-only SQL view. No existing row or column
+is changed. Both pages also derive the same cohorts without requiring the
+view, supporting an unmigrated existing DB. The transaction in `save_prediction`
+serializes count/append/insert and rejects the 97th record, duplicate or earlier
+targets, and a different frozen config. API calls and evaluation rules are unchanged.
+
+Apply on the server that already runs Phase 4, between hourly runs. Do not run
+`prepare_phase4.py`, regenerate calibration, re-enable Phase 4, replace databases,
+or deploy any local backup. No remote restart has been performed by this change.
+
+1. Record the current commit, working tree status, and the existing scheduler
+   and dashboard service names. The repository must have no uncommitted code
+   changes. If it does, preserve and review them before updating. In the existing
+   deployment directory, use its Python environment:
+
+   ```sh
+   git status --short
+   git rev-parse HEAD
+   git fetch origin
+   git merge --ff-only origin/phase4-continuation
+   .venv/bin/python -m unittest test_phase4 -v
+   bash -n run_hourly.sh
+   ```
+
+2. After the active hourly job finishes and before the next :05 invocation:
+
+   ```sh
+   .venv/bin/python migrate_phase4_continuation.py
+   .venv/bin/python -c "from phase4 import load_config, prediction_limit; c=load_config(require_enabled=True); print('frozen limit',c['prediction_limit'],'total per model',prediction_limit(c))"
+   git diff 0e9001f -- phase4_config.json phase4_history_5m.json
+   ```
+
+   The migration first validates the original config and existing counts,
+   creates a SQLite-consistent backup under `backups/phase4-continuation-*`,
+   and only adds the view. Repeating it is safe and makes another backup.
+   Expected limits are `48` and `96`; the frozen-file diff must be empty.
+   A model already at 48 resumes at the next on-time hourly target automatically.
+   Missed hours before deployment remain missing.
+
+3. The hourly script starts new Python processes each run, so the runner needs
+   no restart and the timer schedule must stay unchanged. Reload the existing
+   Gunicorn/dashboard service using its actual configured service name:
+
+   ```sh
+   sudo systemctl reload YOUR_EXISTING_DASHBOARD_SERVICE
+   ```
+
+   If that service has no reload action, restart that dashboard service alone.
+   Service names are not stored in this repository; substitute the verified
+   name from the server rather than guessing it. Do not restart collectors or
+   change the prediction timer. Open `/` and `/analyze/?phase=phase4`: both must
+   show Phase 4a, Phase 4b and Combined; the analysis page has separate confusion
+   and calibration tables for each. Inspect the existing hourly logs after the
+   next :05 run and check the cohort view:
+
+   ```sh
+   .venv/bin/python -c "import sqlite3; from phase4 import DB_PATH; c=sqlite3.connect(DB_PATH.resolve().as_uri()+'?mode=ro',uri=True); print(c.execute('SELECT predictor,cohort,count(*),sum(evaluated_at IS NOT NULL) FROM phase4_segments GROUP BY predictor,cohort').fetchall())"
+   ```
+
+Rollback: remove `phase4.enabled` to pause predictions if needed, preserve the
+current database, then return code to the recorded prior commit and reload the
+dashboard. Leave the additive view and all 4b data in place. Original code will
+stop predicting once a model has at least 48 records; do not delete new records
+to make it run again. Never restore a stale backup over the live DB.

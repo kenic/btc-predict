@@ -8,6 +8,39 @@ from volatility import CLASSES, probabilities
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "btc.db"
 CONFIG_PATH = ROOT / "phase4_config.json"
+COHORT_SIZE = 48
+TOTAL_LIMIT = 96
+
+
+def prediction_limit(config):
+    # Continuation policy is separate from the original frozen design.
+    if config['prediction_limit'] != COHORT_SIZE:
+        raise RuntimeError('Continuation requires the original 48-prediction design')
+    return TOTAL_LIMIT
+
+
+def cohort(number):
+    if 1 <= number <= COHORT_SIZE:
+        return 'phase4a'
+    if COHORT_SIZE < number <= TOTAL_LIMIT:
+        return 'phase4b'
+    raise RuntimeError('Prediction outside the 48+48 design')
+
+
+def segment_rows(rows):
+    """Read-only compatibility path, including databases before view migration.
+
+    Ordinals are per predictor, matching the original per-model stop rule.
+    New saves must append later targets so historical membership stays fixed.
+    """
+    counts = {}
+    result = []
+    for row in sorted(rows, key=lambda r: (r['target_candle_time'], r['predictor'])):
+        model = row['predictor']
+        counts[model] = counts.get(model, 0) + 1
+        result.append(dict(row, prediction_number=counts[model], cohort=cohort(counts[model])))
+    return sorted(result, key=lambda r: (-r['target_candle_time'], r['predictor']))
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -33,6 +66,14 @@ def init_schema():
           evaluated_at TEXT,
           UNIQUE(target_candle_time,predictor),
           FOREIGN KEY(config_id) REFERENCES phase4_configs(config_id));
+        CREATE VIEW IF NOT EXISTS phase4_segments AS
+        SELECT numbered.*,
+          CASE WHEN prediction_number <= 48 THEN 'phase4a'
+               WHEN prediction_number <= 96 THEN 'phase4b'
+               ELSE 'outside_design' END AS cohort
+        FROM (SELECT p.*, ROW_NUMBER() OVER
+          (PARTITION BY predictor ORDER BY target_candle_time, id) AS prediction_number
+          FROM volatility_predictions p) numbered;
         CREATE TRIGGER IF NOT EXISTS freeze_phase4_config_update
         BEFORE UPDATE ON phase4_configs BEGIN SELECT RAISE(ABORT,'Frozen config'); END;
         CREATE TRIGGER IF NOT EXISTS freeze_phase4_config_delete
@@ -74,8 +115,16 @@ def save_prediction(target, predictor, model, config, p, snapshot, previous_rv, 
         c.execute('BEGIN IMMEDIATE')
         assert_phase3_closed(c)
         n = c.execute('SELECT count(*) FROM volatility_predictions WHERE predictor=?', (predictor,)).fetchone()[0]
-        if n >= config['prediction_limit']:
+        if n >= prediction_limit(config):
             raise RuntimeError('Phase 4 prediction limit reached')
+        latest = c.execute('SELECT MAX(target_candle_time) FROM volatility_predictions WHERE predictor=?', (predictor,)).fetchone()[0]
+        if latest is not None and target <= latest:
+            raise RuntimeError('Phase 4 targets must append chronologically')
+        frozen = c.execute('SELECT config_json FROM phase4_configs WHERE config_id=?', (config_hash(config),)).fetchone()
+        if frozen is None or json.loads(frozen[0]) != config:
+            raise RuntimeError('Config differs from frozen database copy')
+        if c.execute('SELECT 1 FROM volatility_predictions WHERE config_id != ? LIMIT 1', (config_hash(config),)).fetchone():
+            raise RuntimeError('Continuation must use the original config for all predictions')
         c.execute("""INSERT INTO volatility_predictions
         (created_at,target_candle_time,predictor,model_version,config_id,p_quiet,p_normal,p_active,context,previous_rv,persistence_class,reason,confidence)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (now(), target,predictor,model,config_hash(config),*p,snapshot,previous_rv,persistence,reason,confidence))

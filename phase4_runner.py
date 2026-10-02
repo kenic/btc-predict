@@ -2,7 +2,7 @@
 import json
 import sqlite3
 from datetime import datetime, timezone
-from phase4 import ROOT, DB_PATH, load_config, save_prediction
+from phase4 import ROOT, DB_PATH, load_config, save_prediction, prediction_limit
 from volatility import CLASSES, classify, probabilities, realized_volatility
 
 def instructions(config):
@@ -34,7 +34,7 @@ def run(predictor):
         if c.execute('SELECT 1 FROM volatility_predictions WHERE target_candle_time=? AND predictor=?',(cutoff,predictor)).fetchone():
             print('Prediction already exists; skipping')
             return
-        if c.execute('SELECT count(*) FROM volatility_predictions WHERE predictor=?',(predictor,)).fetchone()[0]>=config['prediction_limit']:
+        if c.execute('SELECT count(*) FROM volatility_predictions WHERE predictor=?',(predictor,)).fetchone()[0]>=prediction_limit(config):
             print('Phase 4 limit reached; skipping')
             return
     source.validate_microstructure(cutoff)

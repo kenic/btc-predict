@@ -2,7 +2,7 @@
 import html
 import json
 import sqlite3
-from phase4 import DB_PATH, CONFIG_PATH
+from phase4 import DB_PATH, CONFIG_PATH, segment_rows
 from volatility import CLASSES, winner, brier
 
 def esc(value):
@@ -18,6 +18,7 @@ def page(analysis=False):
         phase3=[tuple(r) for r in c.execute("SELECT predictor,count(*),sum(evaluated_at IS NOT NULL) FROM predictions WHERE phase='phase3' GROUP BY predictor")]
     finally:
         c.close()
+    rows=segment_rows(rows)
     config=json.loads(configs[0]['config_json']) if configs else None
     def table(headers, data):
         return '<div class="scroll"><table><tr>'+''.join('<th>'+esc(h)+'</th>' for h in headers)+'</tr>'+''.join('<tr>'+''.join('<td>'+esc(v)+'</td>' for v in row)+'</tr>' for row in data)+'</table></div>'
@@ -34,31 +35,37 @@ def page(analysis=False):
         content+='<p>Phase 4 awaits Phase 3 closure and frozen historical thresholds. Prediction is disabled.</p>'
     def model_p(r):
         return [r['p_quiet'],r['p_normal'],r['p_active']]
-    summaries=[]
-    for model in ('openai','jev'):
-        all_model=[r for r in rows if r['predictor']==model]
-        evaluated=[r for r in all_model if r['actual_class'] in CLASSES]
-        summaries.append([model+' model',len(all_model),*stats(evaluated,model_p)])
-        if config:
-            summaries.append([model+' majority baseline',len(all_model),*stats(evaluated,lambda r:[int(x==config['majority_class']) for x in CLASSES])])
-            summaries.append([model+' persistence baseline',len(all_model),*stats(evaluated,lambda r:[int(x==r['persistence_class']) for x in CLASSES])])
-    content+='<h2>Scores and baselines</h2><p>Baseline comparisons use the same evaluated hours as each model. Majority class is fixed from calibration data. Brier is the sum over three classes (range 0–2; uniform baseline 2/3).</p>'+table(['Predictor','Predicted','Evaluated','Accuracy','Multiclass Brier'],summaries)
-    if analysis:
+    for segment, title in (('phase4a', 'Phase 4a — first 48 predictions per model'),
+                           ('phase4b', 'Phase 4b — next 48 predictions per model'),
+                           ('combined', 'Combined — descriptive aggregate')):
+        content+='<h2>'+title+'</h2>'
+        content+='<p>Phase 4b continues the unchanged frozen design. Cohorts count saved predictions per model; missed hours are not backfilled.</p>'
+        segment_items=[r for r in rows if segment=='combined' or r['cohort']==segment]
+        summaries=[]
         for model in ('openai','jev'):
-            selected=[r for r in rows if r['predictor']==model and r['actual_class'] in CLASSES]
-            content+='<h2>'+esc(model)+' confusion matrix</h2><p>Rows: actual; columns: predicted. Ties resolve QUIET, NORMAL, ACTIVE in that order.</p>'
-            content+=table(['Actual / predicted',*CLASSES],[[a,*[sum(r['actual_class']==a and winner(model_p(r))==p for r in selected) for p in CLASSES]] for a in CLASSES])
-            calibration=[]
-            for i,label in enumerate(CLASSES):
-                for bucket in range(10):
-                    group=[r for r in selected if bucket/10<=model_p(r)[i] and (model_p(r)[i]<(bucket+1)/10 or bucket==9)]
-                    n=len(group)
-                    calibration.append([label,f'{bucket*10}–{(bucket+1)*10}%',n,
-                        f'{sum(model_p(r)[i] for r in group)/n:.1%}' if n else '—',
-                        f'{sum(r["actual_class"]==label for r in group)/n:.1%}' if n else '—'])
-            content+='<h2>'+esc(model)+' class calibration</h2>'+table(['Class','Probability bucket','N','Mean forecast','Observed frequency'],calibration)
+            all_model=[r for r in segment_items if r['predictor']==model]
+            evaluated=[r for r in all_model if r['actual_class'] in CLASSES]
+            summaries.append([model+' model',len(all_model),*stats(evaluated,model_p)])
+            if config:
+                summaries.append([model+' majority baseline',len(all_model),*stats(evaluated,lambda r:[int(x==config['majority_class']) for x in CLASSES])])
+                summaries.append([model+' persistence baseline',len(all_model),*stats(evaluated,lambda r:[int(x==r['persistence_class']) for x in CLASSES])])
+        content+='<h2>Scores and baselines</h2><p>Baseline comparisons use the same evaluated hours as each model. Majority class is fixed from calibration data. Brier is the sum over three classes (range 0–2; uniform baseline 2/3).</p>'+table(['Predictor','Predicted','Evaluated','Accuracy','Multiclass Brier'],summaries)
+        if analysis:
+            for model in ('openai','jev'):
+                selected=[r for r in segment_items if r['predictor']==model and r['actual_class'] in CLASSES]
+                content+='<h2>'+esc(model)+' confusion matrix</h2><p>Rows: actual; columns: predicted. Ties resolve QUIET, NORMAL, ACTIVE in that order.</p>'
+                content+=table(['Actual / predicted',*CLASSES],[[a,*[sum(r['actual_class']==a and winner(model_p(r))==p for r in selected) for p in CLASSES]] for a in CLASSES])
+                calibration=[]
+                for i,label in enumerate(CLASSES):
+                    for bucket in range(10):
+                        group=[r for r in selected if bucket/10<=model_p(r)[i] and (model_p(r)[i]<(bucket+1)/10 or bucket==9)]
+                        n=len(group)
+                        calibration.append([label,f'{bucket*10}–{(bucket+1)*10}%',n,
+                            f'{sum(model_p(r)[i] for r in group)/n:.1%}' if n else '—',
+                            f'{sum(r["actual_class"]==label for r in group)/n:.1%}' if n else '—'])
+                content+='<h2>'+esc(model)+' class calibration</h2>'+table(['Class','Probability bucket','N','Mean forecast','Observed frequency'],calibration)
     from datetime import datetime, timezone
-    content+='<h2>Prediction history</h2>'+table(['Target UTC','Model','QUIET','NORMAL','ACTIVE','Forecast','Actual RV %','Actual','Reason'],[
-        [datetime.fromtimestamp(r['target_candle_time'],timezone.utc).strftime('%Y-%m-%d %H:%M'),r['predictor'],
+    content+='<h2>Prediction history</h2>'+table(['Cohort','Prediction #','Target UTC','Model','QUIET','NORMAL','ACTIVE','Forecast','Actual RV %','Actual','Reason'],[
+        [r['cohort'],r['prediction_number'],datetime.fromtimestamp(r['target_candle_time'],timezone.utc).strftime('%Y-%m-%d %H:%M'),r['predictor'],
          *[f'{p:.1%}' for p in model_p(r)],winner(model_p(r)),f"{r['actual_rv']:.6f}" if r['actual_rv'] is not None else '—',r['actual_class'] or 'Pending',r['reason'] or ''] for r in rows])
     return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC Phase 4 — Volatility</title><style>body{font:16px system-ui;background:#f5f5f7;color:#222;margin:24px auto;padding:0 20px;max-width:1100px}h1,h2{margin-top:32px}p{line-height:1.6}a{color:#245bb2}table{border-collapse:collapse;background:white;width:100%}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}pre{white-space:pre-wrap}.scroll{overflow:auto}nav{display:flex;gap:20px;flex-wrap:wrap}</style><nav><a href="/">Phase 4 dashboard</a><a href="/analyze/?phase=phase4">Phase 4 analysis</a><a href="/direction/">Phase 1–3 dashboard</a><a href="/analyze/">Phase 1–3 analysis</a></nav><h1>BTC Phase 4 — Realized volatility</h1>'+content+'</html>'
