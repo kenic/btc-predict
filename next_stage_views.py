@@ -62,24 +62,37 @@ def report():
     return {'transitions':transitions,'phase4r':summaries,'paired_n':len(common),'paired_evaluated_n':len(paired_targets),'paired_scores':paired,'diagnostics':diagnostics,'failed_or_uncertain_runs':[r for r in runs if r['status']!='complete'],'phase5':{'predicted_n':sum(r['status']=='complete' for r in phase5),'attempted_n':len(phase5),'model':metrics(evaluated,'predicted_rv'),'previous_hour_baseline':metrics(evaluated,'previous_rv'),'predicted_vs_actual':evaluated,'pending':[r for r in phase5 if r['evaluated_at'] is None]}}
 
 
-def page(analysis=False):
+def page(analysis=False, section=None):
+    from ui import page_shell, card, metric_blocks, records_table
     data = report()
-    def table(items):
-        if not items:
-            return '<p>Pending</p>'
-        keys = list(items[0])
-        esc = lambda v: html.escape(str(v))
-        return '<div style="overflow:auto"><table border="1"><tr>'+''.join('<th>'+esc(k)+'</th>' for k in keys)+'</tr>'+''.join('<tr>'+''.join('<td>'+esc(row.get(k,''))+'</td>' for k in keys)+'</tr>' for row in items)+'</table></div>'
-    content = '<h1>Phase 4R / Phase 5</h1><p>SD is sample SD. Agreement is modal argmax frequency. Only complete 10-run ensembles and completed target windows enter scores. All paired scores use the same common evaluated timestamps.</p>'
-    if 'phase4r' in data:
-        content += '<h2>Phase 4R</h2>'+table([dict(predictor=k,**v) for k,v in data['phase4r'].items()])
-        content += '<p>Paired n: '+str(data['paired_n'])+'; paired evaluated n: '+str(data['paired_evaluated_n'])+'</p>'+table([dict(predictor=k,**v) for k,v in data['paired_scores'].items()])
-        content += '<h2>Phase 5</h2><p>Predicted N: '+str(data['phase5']['predicted_n'])+' / 96; attempted N: '+str(data['phase5']['attempted_n'])+'</p>'+table([dict(predictor=k,**data['phase5'][k]) for k in ('model','previous_hour_baseline')])
-        if analysis:
-            content += '<h2>Per-snapshot diagnostics</h2>'+table(data['diagnostics'])
-            content += '<h2>Predicted vs actual RV (%)</h2>'+table([{k:r[k] for k in ('target_candle_time','predicted_rv','actual_rv','previous_rv','model_version')} for r in data['phase5']['predicted_vs_actual']])
-        content += '<h2>Phase 5 pending / failed attempts</h2>'+table([{k:r[k] for k in ('target_candle_time','status','predicted_rv','error')} for r in data['phase5']['pending']])
-        content += '<h2>Audit / pending / failures</h2><pre>'+html.escape(json.dumps({k:v for k,v in data.items() if k in ('transitions','failed_or_uncertain_runs')},indent=2))+'</pre>'
+    title = {'repeated':'Repeated sampling — Phase 4R', 'regression':'RV regression — Phase 5'}.get(section, 'Repeated / Regression — Phase 4R / 5')
+    content = '<h1>'+('Analysis — ' if analysis else '')+title+'</h1>'
+    if 'phase4r' not in data:
+        content += '<p>'+html.escape(data['status'])+'</p>'
     else:
-        content += html.escape(data['status'])
-    return '<!doctype html><html><meta charset="utf-8"><title>BTC Phase 4R / 5</title><nav><a href="/">Phase 4</a> | <a href="/next-stages/">4R / 5 dashboard</a> | <a href="/analyze/?phase=phase4r">4R / 5 analysis</a> | <a href="/direction/">Phase 1–3</a></nav>'+content+'</html>'
+        if section != 'regression':
+            content += '<p class="muted">SD is sample SD. Agreement is modal argmax frequency. Only complete 10-run ensembles and completed target windows enter scores. All paired scores use the same common evaluated timestamps.</p>'
+            for model, values in data['phase4r'].items():
+                content += card('GPT' if model == 'openai' else 'Jev', metric_blocks([
+                    ('Model N', values['n']), ('Expected runs', values['expected_runs']),
+                    ('Completed runs', values['completed_runs']), ('Evaluated N',values['evaluated_n']),
+                    ('Single-shot Brier',values['single_brier']), ('Ensemble Brier',values['ensemble_brier']),
+                    ('Dispersion',values['mean_dispersion'])]))
+            content += card('Paired comparison', metric_blocks([('Paired N',data['paired_n']),
+                ('Paired evaluated N',data['paired_evaluated_n'])])+records_table([
+                dict(predictor=k, **v) for k,v in data['paired_scores'].items()]))
+            content += card('Repeated sampling diagnostics',records_table([dict(predictor=k,**v) for k,v in data['phase4r'].items()])+records_table(data['diagnostics']))
+            content += card('Pending / failed / uncertain repeats',records_table(data['failed_or_uncertain_runs']))
+        if section != 'repeated':
+            values = data['phase5']
+            content += card('Regression progress',metric_blocks([('Predicted N',values['predicted_n']),('Target N',96),('Attempted N',values['attempted_n'])]))
+            content += '<p class="muted">RV and errors are in percent units, not annualized. GPT and the previous-hour RV baseline use identical evaluated target rows. Bias = prediction − actual.</p>'
+            for key,label in [('model','GPT'),('previous_hour_baseline','Previous-hour RV baseline')]:
+                v=values[key]
+                content += card(label,metric_blocks([('N',v['n']),('MAE',v['mae']),('RMSE',v['rmse']),('Bias',v['bias'])]))
+            content += card('Predicted vs actual RV (%)',records_table([{k:r[k] for k in ('target_candle_time','predicted_rv','actual_rv','previous_rv','model_version')} for r in values['predicted_vs_actual']]))
+            content += card('Pending / failed regression attempts',records_table([{k:r[k] for k in ('target_candle_time','status','predicted_rv','error')} for r in values['pending']]))
+        content += card('Experiment audit',records_table(data['transitions']))
+    return page_shell(('Analysis — ' if analysis else '')+title,content,
+                      'analysis' if analysis else section or 'repeated',
+                      phase='phase5' if section == 'regression' else 'phase4r')

@@ -1,3 +1,4 @@
+from ui import page_shell
 import html
 import math
 import sqlite3
@@ -683,7 +684,7 @@ def microstructure_html(data):
         )
     status = html.escape(data["status"])
     content = f'<div class="stat-label">{status}</div>' if status else f"""
-        <div style="overflow-x: auto;">
+        <div class="table-scroll">
         <table>
         <tr><th>Window</th><th>Top 5</th><th>Top 10</th><th>Top 20</th>
         <th>Buy ratio</th><th>Samples</th><th>Trades</th></tr>
@@ -699,7 +700,7 @@ def microstructure_html(data):
             Order-book imbalance (window average) / Trade-flow buy ratio (BTC volume)
         </div>
         {content}
-        <div class="stat-label" style="margin-top: 14px;">
+        <div class="stat-label spaced">
             Reconstructed from market.db at the cutoff; late-arriving trades
             may differ from the stored prediction input. — means no data.
         </div>
@@ -873,344 +874,10 @@ def index():
         jev_stats_phase1,
     )
 
-    return f"""
-<!doctype html>
-<html>
+    return page_shell("Direction — Phase 1–3", f"""
 
-<head>
+<h1>Direction — Phase 1–3</h1>
 
-<meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
->
-
-<meta
-    http-equiv="refresh"
-    content="300"
->
-
-<link
-    rel="icon"
-    type="image/png"
-    href="/static/btc.png"
->
-
-<link
-    rel="apple-touch-icon"
-    href="/static/btc.png"
->
-
-<title>BTC Predictor</title>
-
-<style>
-
-* {{
-    box-sizing: border-box;
-}}
-
-body {{
-    font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-
-    background: #f5f5f7;
-
-    margin: 0;
-    padding: 30px;
-
-    color: #222;
-}}
-
-.container {{
-    max-width: 1050px;
-    margin: auto;
-}}
-
-h1 {{
-    margin-bottom: 4px;
-}}
-
-h2 {{
-    margin-top: 0;
-}}
-
-.subtitle {{
-    color: #777;
-    margin-bottom: 28px;
-}}
-
-.section-subtitle {{
-    color: #777;
-    font-size: 14px;
-    margin-top: -8px;
-    margin-bottom: 20px;
-}}
-
-.phase-badge {{
-    display: inline-block;
-    margin-top: 6px;
-    padding: 4px 9px;
-    border-radius: 999px;
-    background: #eee;
-    color: #666;
-    font-size: 12px;
-    font-weight: 600;
-}}
-
-.card {{
-    background: white;
-
-    border-radius: 16px;
-
-    padding: 24px;
-
-    margin-bottom: 22px;
-
-    box-shadow:
-        0 2px 12px
-        rgba(0, 0, 0, 0.06);
-}}
-
-.price {{
-    font-size: 44px;
-    font-weight: 700;
-    margin-top: 5px;
-}}
-
-.battle-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 22px;
-}}
-
-.actual {{
-    font-weight: 600;
-}}
-
-.battle {{
-    display: grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap: 20px;
-}}
-
-.predictor-card {{
-    background: #fafafa;
-
-    border: 1px solid #eee;
-
-    border-radius: 14px;
-
-    padding: 22px;
-}}
-
-.predictor-name {{
-    font-size: 22px;
-    font-weight: 700;
-}}
-
-.model-version {{
-    color: #888;
-    font-size: 13px;
-    margin-top: 3px;
-}}
-
-.big-prediction {{
-    font-size: 36px;
-    font-weight: 700;
-    margin-top: 22px;
-}}
-
-.big-percent {{
-    font-size: 28px;
-    font-weight: 600;
-    margin-bottom: 20px;
-}}
-
-.up-text {{
-    color: #258a43;
-}}
-
-.down-text {{
-    color: #c33b32;
-}}
-
-.prob-row {{
-    display: grid;
-
-    grid-template-columns:
-        55px 1fr 55px;
-
-    align-items: center;
-
-    gap: 10px;
-
-    margin-top: 10px;
-}}
-
-.mini-bar {{
-    background: #e7e7e7;
-    height: 12px;
-    border-radius: 8px;
-    overflow: hidden;
-}}
-
-.mini-up {{
-    height: 100%;
-    background: #4caf50;
-}}
-
-.mini-down {{
-    height: 100%;
-    background: #e74c3c;
-}}
-
-.confidence {{
-    margin-top: 20px;
-    font-size: 14px;
-    color: #666;
-}}
-
-.reason {{
-    margin-top: 16px;
-
-    padding-top: 16px;
-
-    border-top: 1px solid #e5e5e5;
-
-    color: #555;
-
-    font-size: 14px;
-    line-height: 1.6;
-}}
-
-.scoreboard {{
-    display: grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap: 20px;
-}}
-
-.score {{
-    background: #fafafa;
-    border-radius: 12px;
-    padding: 18px;
-}}
-
-.score-title {{
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 15px;
-}}
-
-.score-grid {{
-    display: grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap: 14px;
-}}
-
-.stat-value {{
-    font-size: 25px;
-    font-weight: 700;
-}}
-
-.stat-label {{
-    color: #888;
-    font-size: 12px;
-}}
-
-table {{
-    width: 100%;
-    border-collapse: collapse;
-}}
-
-th {{
-    text-align: left;
-
-    padding: 11px;
-
-    border-bottom:
-        2px solid #ddd;
-}}
-
-td {{
-    padding: 11px;
-
-    border-bottom:
-        1px solid #eee;
-}}
-
-.prediction-inline {{
-    font-weight: 600;
-    margin-right: 8px;
-}}
-
-.footer {{
-    text-align: center;
-
-    color: #999;
-
-    margin-top: 28px;
-
-    font-size: 12px;
-
-    line-height: 1.6;
-}}
-
-@media
-(max-width: 700px) {{
-
-    body {{
-        padding: 14px;
-    }}
-
-    .battle {{
-        grid-template-columns: 1fr;
-    }}
-
-    .scoreboard {{
-        grid-template-columns: 1fr;
-    }}
-
-    .battle-header {{
-        display: block;
-    }}
-
-    .actual {{
-        margin-top: 8px;
-    }}
-
-    table {{
-        font-size: 12px;
-    }}
-
-    .price {{
-        font-size: 36px;
-    }}
-}}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="container">
-
-<h1>BTC Predictor</h1>
-<p><a href="/analyze/">Analysis →</a></p>
 
 <div class="subtitle">
 GPT vs Jev —
@@ -1335,7 +1002,7 @@ No fees or spread
 
 <h2>Recent Battles</h2>
 
-<table>
+<div class="table-scroll"><table>
 
 <tr>
 <th>Time</th>
@@ -1347,7 +1014,7 @@ No fees or spread
 
 {recent_rows}
 
-</table>
+</table></div>
 
 </div>
 
@@ -1371,12 +1038,7 @@ Not financial advice.
 
 </div>
 
-</div>
-
-</body>
-
-</html>
-"""
+""", "direction", refresh=300)
 
 
 # Analysis uses the stored 0..1 probability scale, matching the dashboard.
@@ -1511,9 +1173,9 @@ def analysis_bar(stats):
 def analyze():
     if request.args.get("phase") in ("phase4r", "phase5"):
         from next_stage_views import page
-        return page(analysis=True)
+        return page(analysis=True, section="regression" if request.args.get("phase") == "phase5" else "repeated")
     if request.args.get("phase") == "phase4":
-        from phase4_views import page
+        from volatility_views import page
         response = app.make_response(page(analysis=True))
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -1521,11 +1183,6 @@ def analyze():
     if phase not in ("all",) + ANALYSIS_PHASES:
         abort(400, description="phase must be all, phase1, phase2 or phase3")
     data = get_analysis(phase)
-    filters = " ".join(
-        f'<a href="?phase={key}"' + (' aria-current="page"' if key == phase else '') + f'>{label}</a>'
-        for key, label in (("phase4", "Phase 4 volatility"), ("all", "All direction phases"), ("phase1", "Phase 1"),
-                           ("phase2", "Phase 2"), ("phase3", "Phase 3"))
-    )
     comparison = analysis_table(
         ["Phase", "Model", "N", "Correct", "Accuracy", "Brier score", "Avg prediction strength"],
         [(f'Phase {p[-1]}', label, s["n"], s["correct"], stat_text(s["accuracy"], "percent"),
@@ -1549,25 +1206,8 @@ def analyze():
     r_text = f'{data["correlation"]:.6f}' if data["correlation"] is not None else "— (fewer than 2 pairs or zero variance)"
     mad_text = f'{data["mad"] * 100:.3f} percentage points' if data["mad"] is not None else "—"
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    page = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BTC Predictor — Analysis</title>
-<style>
-* {{box-sizing:border-box}} body {{margin:0;padding:30px;background:#f5f5f7;color:#222;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-main {{max-width:1100px;margin:auto}} h1 {{margin-bottom:8px}} h2 {{margin-top:0}}
-a {{color:#245bb2}} p {{line-height:1.6}} .muted {{color:#666;font-size:14px}}
-nav {{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0}} nav a {{padding:10px 16px;background:white;border:1px solid #ddd;border-radius:24px;text-decoration:none}}
-nav a[aria-current] {{background:#245bb2;color:white;border-color:#245bb2}}
-section {{background:white;border-radius:16px;padding:24px;margin-bottom:22px;box-shadow:0 2px 12px #0000000f}}
-.table-scroll {{overflow-x:auto}} table {{width:100%;border-collapse:collapse;font-size:14px}} th,td {{padding:12px;text-align:right;border-bottom:1px solid #eee;white-space:nowrap}} th {{color:#555}} th:first-child,td:first-child {{text-align:left}}
-.bar {{position:relative;width:190px;height:16px;background:#edf0f5;border-radius:3px}} .bar span {{display:block;height:100%;background:#487bd1;border-radius:3px}} .bar i {{position:absolute;top:-3px;height:22px;width:2px;background:#222;transform:translateX(-1px)}}
-.metrics {{display:flex;flex-wrap:wrap;gap:28px}} .metrics strong {{display:block;font-size:22px;margin:8px 0}}
-@media(max-width:600px) {{body {{padding:16px}} section {{padding:16px}} th,td {{padding:9px}}}}
-</style></head><body><main>
-<a href="/">← Dashboard</a><h1>BTC Predictor — Analysis</h1>
-<p class="muted">Recomputed from btc.db on every request · {updated}</p>
-<nav aria-label="Phase filter">{filters}</nav>
+    page = page_shell("Analysis — Direction", f"""<h1>Analysis — Direction</h1><p class="muted">Recomputed from btc.db on every request · {updated}</p>
+
 <p class="muted">The phase filter applies to all sections. Only evaluated UP/DOWN rows are included.
 Strength = max(p_up, p_down). Accuracy uses stored correct (missing values are recomputed; ties predict UP).
 Brier = mean((p_up − outcome)²), where UP = 1 and DOWN = 0; lower is better (50/50 baseline: 0.25).
@@ -1585,7 +1225,7 @@ Missing or invalid confidence excluded: {data['missing_confidence']}.</p>
 <div>Mean absolute difference<strong>{mad_text}</strong></div></div>
 <p class="muted">If confidence repeats the probability margin, r approaches 1 and the absolute difference approaches 0.
 The table groups pairs by margin (lower bound included; 100% included in the last group).</p>{confidence_table}</section>
-</main></body></html>"""
+""", "analysis", phase=phase)
     response = app.make_response(page)
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -1602,10 +1242,28 @@ def next_stages_data():
     return report()
 
 @app.route("/")
+@app.route("/volatility/")
 def volatility_dashboard():
-    from phase4_views import page
-    response = app.make_response(page())
+    from volatility_views import page
+    response = app.make_response(page(active="current" if request.path == "/" else "volatility"))
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/repeated/")
+def repeated_dashboard():
+    from repeat_views import page
+    return page()
+
+@app.route("/regression/")
+def regression_dashboard():
+    from regression_views import page
+    return page()
+
+@app.after_request
+def read_only_page_cache(response):
+    if request.path != '/static/style.css':
+        response.headers['Cache-Control'] = 'no-store'
     return response
 
 

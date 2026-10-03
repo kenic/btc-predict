@@ -1,3 +1,4 @@
+from ui import page_shell, styled_table, metric_blocks
 """Read-only Phase 4 dashboard and analysis; no calls to price or prediction APIs."""
 import html
 import json
@@ -12,7 +13,7 @@ SEGMENTS = (('phase4a', 'Phase 4a — predictions 1–48 per predictor'),
 def esc(value):
     return html.escape(str(value))
 
-def page(analysis=False):
+def page(analysis=False, active="volatility"):
     c=sqlite3.connect(DB_PATH.resolve().as_uri()+'?mode=ro',uri=True)
     c.row_factory=sqlite3.Row
     try:
@@ -28,7 +29,7 @@ def page(analysis=False):
         c.close()
     config=json.loads(configs[0]['config_json']) if configs else None
     def table(headers, data):
-        return '<div class="scroll"><table><tr>'+''.join('<th>'+esc(h)+'</th>' for h in headers)+'</tr>'+''.join('<tr>'+''.join('<td>'+esc(v)+'</td>' for v in row)+'</tr>' for row in data)+'</table></div>'
+        return styled_table(headers, data)
     def stats(items, get_p):
         n=len(items)
         return [n, f"{sum(winner(get_p(r))==r['actual_class'] for r in items)/n:.1%}" if n else '—',
@@ -59,6 +60,10 @@ def page(analysis=False):
             all_model=[r for r in segment_items if r['predictor']==model]
             evaluated=[r for r in all_model if r['actual_class'] in CLASSES]
             summaries.append([model+' model',len(all_model),*stats(evaluated,model_p)])
+            scores = stats(evaluated,model_p)
+            content += '<h3>'+('GPT' if model == 'openai' else 'Jev')+'</h3>'+metric_blocks([
+                ('Predicted N',len(all_model)),('Pending',len(all_model)-len(evaluated)),
+                ('Evaluated N',scores[0]),('Accuracy',scores[1]),('Brier',scores[2])])
             if config:
                 summaries.append([model+' majority baseline',len(all_model),*stats(evaluated,lambda r:[int(x==config['majority_class']) for x in CLASSES])])
                 summaries.append([model+' persistence baseline',len(all_model),*stats(evaluated,lambda r:[int(x==r['persistence_class']) for x in CLASSES])])
@@ -82,4 +87,6 @@ def page(analysis=False):
     content+='<h2>Prediction history</h2>'+table(['Cohort','Prediction #','Target UTC','Model','QUIET','NORMAL','ACTIVE','Forecast','Actual RV %','Actual','Reason'],[
         [r['cohort'],r['prediction_number'],datetime.fromtimestamp(r['target_candle_time'],timezone.utc).strftime('%Y-%m-%d %H:%M'),r['predictor'],
          *[f'{p:.1%}' for p in model_p(r)],winner(model_p(r)),f"{r['actual_rv']:.6f}" if r['actual_rv'] is not None else '—',r['actual_class'] or 'Pending',r['reason'] or ''] for r in rows])
-    return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC Phase 4 — Volatility</title><style>body{font:16px system-ui;background:#f5f5f7;color:#222;margin:24px auto;padding:0 20px;max-width:1100px}h1,h2{margin-top:32px}p{line-height:1.6}a{color:#245bb2}table{border-collapse:collapse;background:white;width:100%}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}pre{white-space:pre-wrap}.scroll{overflow:auto}nav{display:flex;gap:20px;flex-wrap:wrap}</style><nav><a href="/next-stages/">Phase 4R / 5</a><a href="/">Phase 4 dashboard</a><a href="/analyze/?phase=phase4">Phase 4 analysis</a><a href="/direction/">Phase 1–3 dashboard</a><a href="/analyze/">Phase 1–3 analysis</a></nav><h1>BTC Phase 4 — Realized volatility</h1>'+content+'</html>'
+    title = 'Analysis — Volatility' if analysis else 'Volatility — Phase 4'
+    return page_shell(title, '<h1>'+title+'</h1>'+content,
+                      'analysis' if analysis else active, phase='phase4')
