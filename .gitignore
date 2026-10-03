@@ -8,3 +8,6 @@ logs/
 
 backups/
 phase4.enabled
+
+.next-stages.lock
+next-stages-worker.log

@@ -1509,6 +1509,9 @@ def analysis_bar(stats):
 
 @app.route("/analyze/")
 def analyze():
+    if request.args.get("phase") in ("phase4r", "phase5"):
+        from next_stage_views import page
+        return page(analysis=True)
     if request.args.get("phase") == "phase4":
         from phase4_views import page
         response = app.make_response(page(analysis=True))
@@ -1587,6 +1590,16 @@ The table groups pairs by margin (lower bound included; 100% included in the las
     response.headers["Cache-Control"] = "no-store"
     return response
 
+
+@app.route("/next-stages/")
+def next_stages_dashboard():
+    from next_stage_views import page
+    return page()
+
+@app.route("/next-stages/data.json")
+def next_stages_data():
+    from next_stage_views import report
+    return report()
 
 @app.route("/")
 def volatility_dashboard():

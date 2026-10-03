@@ -39,3 +39,9 @@ This is an experimental project, not financial advice.
 ## Phase 4
 
 Next-hour realized volatility classification is implemented; see [PHASE4.md](PHASE4.md) for frozen thresholds, closure/start guards, views and rollback. Phase 1–3 direction data remains intact.
+
+## Phase 4R / Phase 5
+
+Additive replay, continuous RV regression, audit markers and separate dashboard routes.
+See [NEXT_STAGES.md](NEXT_STAGES.md) for the frozen design, restart safety,
+API uncertainty handling and user-operated deployment/restart instructions.
