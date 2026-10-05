@@ -1183,6 +1183,8 @@ def analyze():
     if phase not in ("all",) + ANALYSIS_PHASES:
         abort(400, description="phase must be all, phase1, phase2 or phase3")
     data = get_analysis(phase)
+    from direction_volatility import report as rv_report, render as rv_render
+    rv_section = rv_render(rv_report(DB_PATH, phase), analysis_table, stat_text)
     comparison = analysis_table(
         ["Phase", "Model", "N", "Correct", "Accuracy", "Brier score", "Avg prediction strength"],
         [(f'Phase {p[-1]}', label, s["n"], s["correct"], stat_text(s["accuracy"], "percent"),
@@ -1213,6 +1215,7 @@ Strength = max(p_up, p_down). Accuracy uses stored correct (missing values are r
 Brier = mean((p_up − outcome)²), where UP = 1 and DOWN = 0; lower is better (50/50 baseline: 0.25).
 Empty groups show —. Invalid probability rows excluded: {data['skipped']}; correct values recomputed: {data['fallback_correct']}.</p>
 <section><h2>Phase comparison</h2>{comparison}</section>
+{rv_section}
 <section><h2>Calibration analysis</h2><p class="muted">Blue bar: actual accuracy. Black marker: ideal accuracy, equal to the mean prediction strength in that bucket.
 Buckets include their lower bound and exclude their upper bound, except 100% is included in the last bucket.</p>{calibration}</section>
 <section><h2>Threshold analysis</h2><p class="muted">Keep predictions whose strength is at least the threshold (not Jev's separate confidence field).

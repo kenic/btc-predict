@@ -11,3 +11,6 @@ phase4.enabled
 
 .next-stages.lock
 next-stages-worker.log
+
+direction_history_5m.json
+direction_history_5m.tmp
