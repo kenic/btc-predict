@@ -66,6 +66,14 @@ class SharedUITests(unittest.TestCase):
             model=dict(n=1,mae=.2,rmse=.2,bias=-.2),previous_hour_baseline=dict(n=1,mae=.3,rmse=.3,bias=.3),
             predicted_vs_actual=[dict(target_candle_time=3600,predicted_rv=.1,actual_rv=.3,previous_rv=.6,model_version='fixture')],
             pending=[dict(target_candle_time=7200,status='failed',predicted_rv=None,error='<unsafe>')]))
+        from repeated_analysis import summarize
+        from test_repeated_analysis import diagnostic
+        d = diagnostic(3600, [10,0,0])
+        d.update(source_id=1,actual_class='QUIET')
+        data['diagnostics'] = [d]
+        data['phase4r']['openai'].update(summarize([d]))
+        data['phase4r']['openai'].update(invalid_runs=0,processed_runs=11,excluded_invalid_snapshots=0)
+        data.update(paired_stability_n=0,paired_stability={},retry_exceptions=[])
         with patch.object(next_stage_views,'report',return_value=data):
             repeated=next_stage_views.page(section='repeated')
             regression=next_stage_views.page(section='regression')

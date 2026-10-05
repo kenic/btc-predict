@@ -6,6 +6,7 @@ import sqlite3
 import statistics
 from phase4 import DB_PATH
 from volatility import brier, winner
+from repeated_analysis import CLASSES, agreement_bucket, summarize, paired_analysis
 
 
 def metrics(rows, key):
@@ -39,6 +40,9 @@ def report():
         complete = [r for r in runs if r['source_id']==source['id'] and r['status']=='complete']
         invalid = sum(r['source_id']==source['id'] and r['status']=='invalid' for r in runs)
         d = {'source_id':source['id'],'predictor':source['predictor'], 'target':source['target_candle_time'],'completed':len(complete),'invalid':invalid,'processed':len(complete)+invalid}
+        original = winner([source[k] for k in ('p_quiet','p_normal','p_active')])
+        votes = {label: sum(winner([r[k] for k in ('p_quiet','p_normal','p_active')]) == label for r in complete) for label in CLASSES}
+        d.update(votes=votes, original_argmax=original, flips=len(complete)-votes[original], actual_class=live.get(source['id'], {}).get('actual_class'))
         if complete:
             columns = [[r[k] for r in complete] for k in ('p_quiet','p_normal','p_active')]
             d.update(mean=[statistics.mean(v) for v in columns],
@@ -46,7 +50,10 @@ def report():
                      range=[max(v)-min(v) for v in columns])
             d['argmax_agreement'] = max(sum(r['argmax_class']==label for r in complete) for label in ('QUIET','NORMAL','ACTIVE'))/len(complete)
             d['dispersion'] = sum(v*v for v in d['sd'])
-            actual = live[source['id']]['actual_class']
+            d.update(distinct_choices=sum(v > 0 for v in votes.values()), agreement_pct=100*max(votes.values())/len(complete))
+            if len(complete)==10:
+                d.update(agreement_bucket=agreement_bucket(votes), ensemble_argmax=winner(d['mean']))
+            actual = d['actual_class']
             if len(complete)==10 and actual:
                 d.update(single_brier=brier([source[k] for k in ('p_quiet','p_normal','p_active')],actual), ensemble_brier=brier(d['mean'],actual), ensemble_error=int(winner(d['mean'])!=actual), single_error=int(winner([source[k] for k in ('p_quiet','p_normal','p_active')])!=actual))
         diagnostics.append(d)
@@ -59,10 +66,15 @@ def report():
         def mean(key):
             return statistics.mean(d[key] for d in scored) if scored else None
         summaries[model] = {'n':len(ds),'expected_runs':len(ds)*10,'completed_runs':sum(d['completed'] for d in ds),'invalid_runs':sum(d['invalid'] for d in ds),'processed_runs':sum(d['processed'] for d in ds),'excluded_invalid_snapshots':sum(d['invalid']>0 for d in ds),'evaluated_n':len(scored),'single_brier':mean('single_brier'),'ensemble_brier':mean('ensemble_brier'),'mean_dispersion':mean('dispersion'),'dispersion_vs_ensemble_brier_r':correlation([d['dispersion'] for d in scored],[d['ensemble_brier'] for d in scored]),'dispersion_vs_single_error_r':correlation([d['dispersion'] for d in scored],[d['single_error'] for d in scored])}
+        summaries[model].update(summarize(ds))
+    paired_stability_n, paired_stability = paired_analysis(diagnostics)
     paired_targets = {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='openai'} & {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='jev'}
     paired = {model: {key:statistics.mean(d[key] for d in diagnostics if d['predictor']==model and d['target'] in paired_targets) if paired_targets else None for key in ('single_brier','ensemble_brier')} for model in ('openai','jev')}
+    for model in ('openai', 'jev'):
+        comparison = summarize([d for d in diagnostics if d['predictor']==model and d['target'] in paired_targets])
+        paired[model].update({k:comparison[k] for k in ('single_accuracy_pct','ensemble_accuracy_pct','wrong_to_correct','correct_to_wrong','ensemble_changed')})
     evaluated = [r for r in phase5 if r['evaluated_at'] is not None]
-    return {'retry_exceptions':retries,'transitions':transitions,'phase4r':summaries,'paired_n':len(common),'paired_evaluated_n':len(paired_targets),'paired_scores':paired,'diagnostics':diagnostics,'failed_or_uncertain_runs':[r for r in runs if r['status']!='complete'],'phase5':{'predicted_n':sum(r['status']=='complete' for r in phase5),'attempted_n':len(phase5),'model':metrics(evaluated,'predicted_rv'),'previous_hour_baseline':metrics(evaluated,'previous_rv'),'predicted_vs_actual':evaluated,'pending':[r for r in phase5 if r['evaluated_at'] is None]}}
+    return {'paired_stability_n':paired_stability_n, 'paired_stability':paired_stability, 'retry_exceptions':retries,'transitions':transitions,'phase4r':summaries,'paired_n':len(common),'paired_evaluated_n':len(paired_targets),'paired_scores':paired,'diagnostics':diagnostics,'failed_or_uncertain_runs':[r for r in runs if r['status']!='complete'],'phase5':{'predicted_n':sum(r['status']=='complete' for r in phase5),'attempted_n':len(phase5),'model':metrics(evaluated,'predicted_rv'),'previous_hour_baseline':metrics(evaluated,'previous_rv'),'predicted_vs_actual':evaluated,'pending':[r for r in phase5 if r['evaluated_at'] is None]}}
 
 
 def page(analysis=False, section=None):
@@ -77,14 +89,22 @@ def page(analysis=False, section=None):
             content += '<p class="muted">SD is sample SD. Agreement is modal argmax frequency. Invalid responses are recorded and excluded. Only complete 10-valid-response ensembles and completed target windows enter scores. All paired scores use the same common evaluated timestamps.</p>'
             for model, values in data['phase4r'].items():
                 content += card('GPT' if model == 'openai' else 'Jev', metric_blocks([
-                    ('Model N', values['n']), ('Expected runs', values['expected_runs']),
+                    ('Eligible snapshots', values['n']), ('10-run snapshots',values['stability_n']), ('Unanimous',values['unanimous']), ('Choice-changing',values['choice_changing']), ('Flips / completed runs',str(values['flips'])+' / '+str(values['flip_denominator'])), ('Flip rate (%)',values['flip_rate_pct']), ('Mean agreement (%)',values['mean_agreement_pct']), ('Expected runs', values['expected_runs']),
                     ('Completed runs', values['completed_runs']), ('Invalid runs', values['invalid_runs']), ('Processed runs', values['processed_runs']), ('Excluded snapshots', values['excluded_invalid_snapshots']), ('Evaluated N',values['evaluated_n']),
                     ('Single-shot Brier',values['single_brier']), ('Ensemble Brier',values['ensemble_brier']),
                     ('Dispersion',values['mean_dispersion'])]))
+            content += '<p class="muted">Stability and ensemble changes require exactly 10 completed repeats. Agreement buckets: 10, 8–9, 6–7, or 4–5 modal votes out of 10. Argmax ties use QUIET, NORMAL, ACTIVE order. Flip rates include every completed repeat, including partial snapshots. Accuracy and Brier compare identical evaluated snapshots. Percent columns use 0–100 units.</p>'
+            for model, values in data['phase4r'].items():
+                label = 'GPT' if model == 'openai' else 'Jev'
+                content += card(label+' — choice stability and ensemble effect', metric_blocks([(k.replace('_',' '),values[k]) for k in ('stability_n','unanimous','two_classes','three_classes','choice_changing','ensemble_unchanged','ensemble_changed','evaluated_n','wrong_to_correct','correct_to_wrong','single_accuracy_pct','ensemble_accuracy_pct')]))
+                content += card(label+' — original → repeat transitions',records_table(values['transition_matrix']))
+                content += card(label+' — agreement vs performance',records_table(values['agreement_performance'])+records_table(values['stability_performance'])+'<p>'+html.escape(values['association'])+'</p>')
+                content += card(label+' — class-specific instability',records_table(values['class_instability']))
+            content += card('Paired stability — common complete timestamps',metric_blocks([('Paired complete N',data['paired_stability_n'])])+records_table([dict(predictor=m,**{k:v[k] for k in ('stability_n','unanimous','choice_changing','flip_rate_pct','mean_agreement_pct')}) for m,v in data['paired_stability'].items()]))
             content += card('Paired comparison', metric_blocks([('Paired N',data['paired_n']),
                 ('Paired evaluated N',data['paired_evaluated_n'])])+records_table([
                 dict(predictor=k, **v) for k,v in data['paired_scores'].items()]))
-            content += card('Repeated sampling diagnostics',records_table([dict(predictor=k,**v) for k,v in data['phase4r'].items()])+records_table(data['diagnostics']))
+            content += card('Repeated sampling diagnostics',records_table([dict(predictor=k,**{key:value for key,value in v.items() if not isinstance(value,(list,dict))}) for k,v in data['phase4r'].items()])+records_table([dict(predictor=d['predictor'],target=d['target'],completed=d['completed'],Q=d['votes']['QUIET'],N=d['votes']['NORMAL'],A=d['votes']['ACTIVE'],agreement_pct=d.get('agreement_pct'),agreement_bucket=d.get('agreement_bucket'),original_argmax=d['original_argmax'],ensemble_argmax=d.get('ensemble_argmax'),actual_class=d['actual_class'],mean_probabilities=d.get('mean'),sample_sd=d.get('sd'),probability_range=d.get('range')) for d in data['diagnostics']]))
             content += card('Invalid / pending / failed / uncertain repeats',records_table(data['failed_or_uncertain_runs']))
         if section != 'repeated':
             values = data['phase5']
