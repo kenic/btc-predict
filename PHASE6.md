@@ -15,8 +15,15 @@ stopping. Ten volatility calls on one snapshot are repetitions, not ten samples.
 Phase 6 can run longer than the existing 96-prediction Phase 5; Phase 5 retains
 its own original stopping rule and continues unchanged.
 
-The OpenAI volatility single-shot must be ACTIVE, and all ten repeats must be
-valid, with modal ACTIVE and at least eight ACTIVE argmax votes. The Phase 4
+Volatility repeated GPT classification is called **Repeat agreement** or
+**10-shot repeat agreement**. The gate requires all three conditions:
+
+- Single-shot volatility = ACTIVE
+- Repeat modal class = ACTIVE
+- Repeat agreement >= 8/10
+
+All ten repeats must be valid. **ACTIVE repeat agreement >= 8/10** means at
+least eight of the ten repeat classifications are ACTIVE. The Phase 4
 thresholds, prompt, probability validation and QUIET/NORMAL/ACTIVE tie order are
 reused. Original single-shot refers to slot zero, distinct from the ten repeats;
 when an equivalent existing Phase 4 record is present it is reused instead of
@@ -47,9 +54,9 @@ Methods (all `phase6-v1`):
 - Order book: equal sign vote of preceding 60m top10 imbalance minus 0.5 and
   microprice offset; tie abstains.
 - Expanding L2 logistic regression described below.
-- Majority vote of eligible base methods (at least three; tie abstains), and
-  probability average (at least two actual probability methods; 0.5 predicts UP).
-  Ensembles never include other ensembles or assign invented probabilities to
+- Majority-vote ensemble (Direction ensemble) of eligible base methods (at least three; tie abstains), and
+  Probability-average ensemble (Direction ensemble; at least two actual probability methods; 0.5 predicts UP).
+  Direction ensembles never include other Direction ensembles or assign invented probabilities to
   rules. Membership is saved. All base methods receive equal weight.
 
 Zero, unavailable or non-finite rule signals abstain. Method failures remain
@@ -69,7 +76,7 @@ are excluded. Phase 1 lacks the required representation and is unavailable for
 training. Historical snapshots are not reconstructed. Newly fetched evaluation
 labels cannot enter a current fit. Training is performed independently at each
 accepted gate, with at least 100 complete labeled hours and ten per class.
-Until then the method, and potentially the probability ensemble, are unavailable.
+Until then the method, and potentially the Probability-average ensemble (Direction ensemble), are unavailable.
 
 The features are 1h return, 5m return, 15m return, SMA percentage gap, normalized
 MACD histogram, 60m buy ratio, top10 imbalance and microprice offset. Scaling
@@ -88,7 +95,7 @@ coverage and their ACTIVE classification remains unknown. FLAT is excluded
 from accuracy/Brier and contributes zero PnL. Fees, spread and position sizing
 are excluded. Reported metrics can use different N; those counts are explicit.
 
-`/analyze/?phase=phase6` compares all methods/ensembles on common scored events,
+`/analyze/?phase=phase6` compares all methods/Direction ensembles on common scored events,
 including accuracy, PnL and probability-intersection Brier differences. Two-sided
 exact McNemar p-values appear from 20 common events. These multiple comparisons
 are exploratory and unadjusted; they are not confirmation of an edge.
@@ -104,7 +111,7 @@ There is no current live DB in the development checkout; actual prospective
 gate frequency cannot be verified here. Calibration's one-third ACTIVE share
 is not the prospective gate rate. The read-only `--frequency` command inspects
 existing frozen OpenAI Phase 4R sources using the actual fixed gate; its results
-are saved into the preregistration at start. Partial ensembles are reported and
+are saved into the preregistration at start. Incomplete 10-shot repeat agreement results are reported and
 excluded from accepted historical gates. Historical repeat results are an
 estimate, not prospective evidence, and the 96-gate stopping rule stays fixed.
 
@@ -132,6 +139,29 @@ a new live target. Pending interrupted gates become rejected; interrupted method
 reservations become unavailable. Provider calls cannot be guaranteed exactly
 once across a remote/local crash, but persisted attempts are never reissued.
 
+## Terminology-only UI updates
+
+“Ensemble” refers exclusively to combinations of direction predictors:
+**Direction ensemble**, **Majority-vote ensemble**, or **Probability-average
+ensemble**. Volatility uses **Repeat agreement**, **10-shot repeat agreement**
+and **Repeat modal class**. Internal method IDs and frozen metadata may retain
+legacy identifiers; presentation aliases clarify their meaning without changing
+stored records, configuration hashes or implementation hashes.
+
+For this terminology-only update on an already deployed `phase6` checkout:
+
+```sh
+cd /opt/btc-predict
+git pull --ff-only origin phase6
+.venv/bin/python -m unittest test_phase6 test_ui -q
+sudo systemctl restart btc-web.service
+systemctl is-active btc-web.service
+```
+
+Only the web service needs restart. No migration, timer/worker restart or new
+`--start` invocation is needed. Keep the existing start state and both release
+tags unchanged. The original deployment steps below apply to initial deployment.
+
 ## User-operated server deployment
 
 No live server operation was performed by this implementation task. Use the
@@ -156,7 +186,7 @@ flock .next-stages.lock sh -eu -c '
   .venv/bin/python -c '\''import sqlite3; c=sqlite3.connect("btc.db"); c.backup(sqlite3.connect("btc.db.before-phase6"))'\''
   git switch phase6
   git merge --ff-only origin/phase6
-  test "$(git rev-parse HEAD)" = "$(git rev-parse phase6-start^{commit})"
+  git merge-base --is-ancestor phase6-start HEAD
   .venv/bin/python -m unittest discover -q
   .venv/bin/python -c '\''from phase6 import migrate; migrate()'\''
 '

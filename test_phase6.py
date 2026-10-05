@@ -121,7 +121,7 @@ class RuntimeTests(unittest.TestCase):
         p6.migrate()
         self.cfg = p6.design({'quiet_upper':.2,'active_lower':.4},'test-model')
         self.cfg['implementation_hashes'] = p6.implementation_hashes()
-        self.cfg['historical_frequency'] = {}
+        self.cfg['historical_frequency'] = {'interpretation': 'Historical repeat audit only; missing ensembles excluded; future frequency unknown'}
         with p6.database() as c:
             c.execute('INSERT INTO phase6_config VALUES(1,?,?,?,?,?)',
                       (json.dumps(self.cfg),phase4.config_hash(self.cfg),'start',3600,'test-sha'))
@@ -272,7 +272,19 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(response.status_code,200)
             page = client.get('/analyze/?phase=phase6').get_data(as_text=True)
             self.assertIn('Paired comparisons',page)
-            self.assertIn('≥8/10',page)
+            self.assertEqual(client.get('/direction-active/data.json').get_json()['config'],self.cfg)
+            from html import unescape
+            for route in ('/direction-active/', '/analyze/?phase=phase6'):
+                rendered = unescape(client.get(route).get_data(as_text=True))
+                for label in ('Single-shot volatility = ACTIVE', 'Repeat modal class = ACTIVE',
+                              'Repeat agreement >= 8/10', '10-shot repeat agreement',
+                              'ACTIVE repeat agreement >= 8/10', 'Direction ensemble',
+                              'Majority-vote ensemble', 'Probability-average ensemble',
+                              '<th>ACTIVE repeat agreement</th>'):
+                    self.assertIn(label,rendered)
+                self.assertNotIn('including ensembles',rendered)
+                self.assertNotIn('Probability ensemble',rendered)
+                self.assertNotIn('missing ensembles excluded',rendered)
         self.assertEqual(before,self.db.read_bytes())
         data = views.report(self.db)
         self.assertEqual(data['accepted'],1)

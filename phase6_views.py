@@ -90,13 +90,44 @@ def report(path):
     return result
 
 
+# Presentation aliases only: persisted identifiers and frozen config stay intact.
+METHOD_LABELS = {
+    'ensemble_vote': 'Majority-vote ensemble (Direction ensemble)',
+    'ensemble_probability': 'Probability-average ensemble (Direction ensemble)',
+}
+
+
+def display_text(value):
+    if not isinstance(value, str):
+        return value
+    return METHOD_LABELS.get(value, value).replace(
+        'missing ensembles excluded', 'incomplete 10-shot repeat agreement results excluded').replace(
+        'Modal ACTIVE and >=8/10 required',
+        'Repeat modal class = ACTIVE and ACTIVE repeat agreement >= 8/10 required')
+
+
+def display_records(rows):
+    labels = {'single_class': 'Single-shot volatility', 'active_votes': 'ACTIVE repeat agreement'}
+    if not rows:
+        return records_table([])
+    keys = list(dict.fromkeys(k for row in rows for k in row))
+    return styled_table(
+        [labels.get(k,k.replace('_',' ').capitalize()) for k in keys],
+        [[('—' if row.get(k) is None else str(row[k])+'/10') if k == 'active_votes'
+          else display_text(row.get(k,'—')) for k in keys] for row in rows])
+
+
 def page(path, analysis=False):
     data = report(path)
     introduction = ('<h1>Active Direction — Phase 6</h1>'
         '<p>Prospective high-confidence-ACTIVE direction prediction. '
-        'Fixed gate: single-shot ACTIVE + ten valid repeated classifications, modal ACTIVE, '
-        'ACTIVE votes ≥8/10. Effective sample count is accepted distinct target hours, not API calls. '
-        'Stop after 96 accepted gates, including gates with missing direction outputs.</p>'
+        'Volatility gate uses 10-shot repeat agreement on the same saved snapshot.</p>'
+        '<ul><li>Single-shot volatility = ACTIVE</li>'
+        '<li>Repeat modal class = ACTIVE</li>'
+        '<li>Repeat agreement &gt;= 8/10</li></ul>'
+        '<p>All ten repeats must be valid; ACTIVE repeat agreement &gt;= 8/10 is required. '
+        'Effective sample count is accepted distinct target hours, not API calls. '
+        'Stop after 96 accepted target hours, including gates with missing direction outputs.</p>'
         '<p>Phase 1–3 retrospective ACTIVE accuracy was approximately 34.9% for OpenAI and 41.9% for Jev. '
         'ACTIVE is not assumed easier: this experiment compares alternative conditional signals prospectively.</p>')
     counts = card(data['status'], metric_blocks([('Accepted / 96',str(data['accepted'])+' / 96'),
@@ -106,28 +137,33 @@ def page(path, analysis=False):
         return '—' if v is None else f'{v:.5f}' if isinstance(v,float) else str(v)
     fields = ('method','n','correct','accuracy','brier_n','brier','pnl_n','mean_signed_pnl',
               'mean_absolute_return','median_absolute_return','coverage_all','coverage_active','coverage_accepted')
-    scoreboard = card('Method scoreboard · including ensembles', styled_table(fields,
-        [[fmt(m[k]) for k in fields] for m in data['methods']]))
+    scoreboard = card('Method scoreboard · including Direction ensembles', styled_table(
+        ('Direction predictor', 'N', 'Correct', 'Accuracy', 'Brier N', 'Brier', 'PnL N',
+         'Mean signed PnL', 'Mean absolute return', 'Median absolute return',
+         'Coverage / all hours', 'Coverage / single-shot ACTIVE hours', 'Coverage / accepted hours'),
+        [[fmt(display_text(m[k])) for k in fields] for m in data['methods']]))
     explanation = ('<p>Accuracy/coverage are fractions. N excludes FLAT; Brier only for probability methods. '
         'PnL = ± target percent return for unit long/short, no fees/spread. FLAT contributes zero PnL. '
         'Coverage uses available predictions, all scheduled hours (missing cycles included), observed single-shot ACTIVE '
         'hours and accepted gates. Rule abstentions and provider failures remain missing; rules have no invented probabilities. '
-        'Probability ensemble needs two eligible probability methods; majority vote needs three methods and abstains on ties. '
+        'Probability-average ensemble (Direction ensemble) needs two eligible probability methods; '
+        'Majority-vote ensemble (Direction ensemble) needs three methods and abstains on ties. '
         'Missing-hour ACTIVE status is unknown.</p>')
     content = introduction+counts+scoreboard+explanation
     if analysis:
         content += card('Paired comparisons on common events',
             '<p>Two-sided exact McNemar p-values appear from 20 common scored events. '
             'Exploratory comparisons are unadjusted for multiple testing; differences are left minus right. '
-            'Brier differences use the probability intersection only.</p>'+records_table(data['paired']))
-    content += card('Recent accepted ACTIVE events',records_table(data['recent_accepted']))
-    content += card('Recent accepted-event method predictions',records_table(data['recent_predictions']))
-    content += card('Recent hours · accepted and rejected',records_table(data['recent']))
-    content += card('Missing method outputs · never backfilled',records_table(data['missing'][-60:]))
+            'Brier differences use the probability intersection only.</p>'+display_records(data['paired']))
+    content += card('Recent accepted ACTIVE events',display_records(data['recent_accepted']))
+    content += card('Recent accepted-event method predictions',display_records(data['recent_predictions']))
+    content += card('Recent hours · accepted and rejected',display_records(data['recent']))
+    content += card('Missing method outputs · never backfilled',display_records(data['missing'][-60:]))
     if data['config']:
         from html import escape
         content += card('Frozen preregistration', '<p>Started: '+escape(data['started_at'])+' · Code: '+escape(data['code_sha'])+
-            ' · Config hash: '+escape(data['config_hash'])+'</p><details><summary>Frozen design</summary><pre>'+
-            escape(json.dumps(data['config'],indent=2,sort_keys=True))+'</pre></details>')
+            ' · Config hash: '+escape(data['config_hash'])+'</p><p>Terminology normalized for display; stored preregistration is unchanged.</p>'
+            '<details><summary>Frozen design</summary><pre>'+
+            escape(display_text(json.dumps(data['config'],indent=2,sort_keys=True)))+'</pre></details>')
     return page_shell('Active Direction — Phase 6',content,'analysis' if analysis else 'phase6',
                       phase='phase6' if analysis else None,refresh=300)
