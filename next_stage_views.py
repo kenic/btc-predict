@@ -37,7 +37,8 @@ def report():
     diagnostics = []
     for source in sources:
         complete = [r for r in runs if r['source_id']==source['id'] and r['status']=='complete']
-        d = {'source_id':source['id'],'predictor':source['predictor'], 'target':source['target_candle_time'],'completed':len(complete)}
+        invalid = sum(r['source_id']==source['id'] and r['status']=='invalid' for r in runs)
+        d = {'source_id':source['id'],'predictor':source['predictor'], 'target':source['target_candle_time'],'completed':len(complete),'invalid':invalid,'processed':len(complete)+invalid}
         if complete:
             columns = [[r[k] for r in complete] for k in ('p_quiet','p_normal','p_active')]
             d.update(mean=[statistics.mean(v) for v in columns],
@@ -57,7 +58,7 @@ def report():
         scored = [d for d in ds if 'ensemble_brier' in d]
         def mean(key):
             return statistics.mean(d[key] for d in scored) if scored else None
-        summaries[model] = {'n':len(ds),'expected_runs':len(ds)*10,'completed_runs':sum(d['completed'] for d in ds),'evaluated_n':len(scored),'single_brier':mean('single_brier'),'ensemble_brier':mean('ensemble_brier'),'mean_dispersion':mean('dispersion'),'dispersion_vs_ensemble_brier_r':correlation([d['dispersion'] for d in scored],[d['ensemble_brier'] for d in scored]),'dispersion_vs_single_error_r':correlation([d['dispersion'] for d in scored],[d['single_error'] for d in scored])}
+        summaries[model] = {'n':len(ds),'expected_runs':len(ds)*10,'completed_runs':sum(d['completed'] for d in ds),'invalid_runs':sum(d['invalid'] for d in ds),'processed_runs':sum(d['processed'] for d in ds),'excluded_invalid_snapshots':sum(d['invalid']>0 for d in ds),'evaluated_n':len(scored),'single_brier':mean('single_brier'),'ensemble_brier':mean('ensemble_brier'),'mean_dispersion':mean('dispersion'),'dispersion_vs_ensemble_brier_r':correlation([d['dispersion'] for d in scored],[d['ensemble_brier'] for d in scored]),'dispersion_vs_single_error_r':correlation([d['dispersion'] for d in scored],[d['single_error'] for d in scored])}
     paired_targets = {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='openai'} & {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='jev'}
     paired = {model: {key:statistics.mean(d[key] for d in diagnostics if d['predictor']==model and d['target'] in paired_targets) if paired_targets else None for key in ('single_brier','ensemble_brier')} for model in ('openai','jev')}
     evaluated = [r for r in phase5 if r['evaluated_at'] is not None]
@@ -73,18 +74,18 @@ def page(analysis=False, section=None):
         content += '<p>'+html.escape(data['status'])+'</p>'
     else:
         if section != 'regression':
-            content += '<p class="muted">SD is sample SD. Agreement is modal argmax frequency. Only complete 10-run ensembles and completed target windows enter scores. All paired scores use the same common evaluated timestamps.</p>'
+            content += '<p class="muted">SD is sample SD. Agreement is modal argmax frequency. Invalid responses are recorded and excluded. Only complete 10-valid-response ensembles and completed target windows enter scores. All paired scores use the same common evaluated timestamps.</p>'
             for model, values in data['phase4r'].items():
                 content += card('GPT' if model == 'openai' else 'Jev', metric_blocks([
                     ('Model N', values['n']), ('Expected runs', values['expected_runs']),
-                    ('Completed runs', values['completed_runs']), ('Evaluated N',values['evaluated_n']),
+                    ('Completed runs', values['completed_runs']), ('Invalid runs', values['invalid_runs']), ('Processed runs', values['processed_runs']), ('Excluded snapshots', values['excluded_invalid_snapshots']), ('Evaluated N',values['evaluated_n']),
                     ('Single-shot Brier',values['single_brier']), ('Ensemble Brier',values['ensemble_brier']),
                     ('Dispersion',values['mean_dispersion'])]))
             content += card('Paired comparison', metric_blocks([('Paired N',data['paired_n']),
                 ('Paired evaluated N',data['paired_evaluated_n'])])+records_table([
                 dict(predictor=k, **v) for k,v in data['paired_scores'].items()]))
             content += card('Repeated sampling diagnostics',records_table([dict(predictor=k,**v) for k,v in data['phase4r'].items()])+records_table(data['diagnostics']))
-            content += card('Pending / failed / uncertain repeats',records_table(data['failed_or_uncertain_runs']))
+            content += card('Invalid / pending / failed / uncertain repeats',records_table(data['failed_or_uncertain_runs']))
         if section != 'repeated':
             values = data['phase5']
             content += card('Regression progress',metric_blocks([('Predicted N',values['predicted_n']),('Target N',96),('Attempted N',values['attempted_n'])]))
@@ -95,6 +96,7 @@ def page(analysis=False, section=None):
             content += card('Predicted vs actual RV (%)',records_table([{k:r[k] for k in ('target_candle_time','predicted_rv','actual_rv','previous_rv','model_version')} for r in values['predicted_vs_actual']]))
             content += card('Pending / failed regression attempts',records_table([{k:r[k] for k in ('target_candle_time','status','predicted_rv','error')} for r in values['pending']]))
         content += card('Experiment audit',records_table(data['transitions']))
+        content += card('Prior retry exceptions',records_table(data['retry_exceptions']))
     return page_shell(('Analysis — ' if analysis else '')+title,content,
                       'analysis' if analysis else section or 'repeated',
                       phase='phase5' if section == 'regression' else 'phase4r')

@@ -37,6 +37,10 @@ def migrate():
           authorized_at TEXT NOT NULL, reason TEXT NOT NULL,
           original_run_json TEXT NOT NULL,
           PRIMARY KEY(source_id,repeat_no));
+        CREATE TABLE IF NOT EXISTS phase4r_invalid_audit (
+          source_id INTEGER NOT NULL, repeat_no INTEGER NOT NULL,
+          recorded_at TEXT NOT NULL, original_run_json TEXT NOT NULL,
+          PRIMARY KEY(source_id,repeat_no));
         CREATE TABLE IF NOT EXISTS phase5_predictions (
           id INTEGER PRIMARY KEY, target_candle_time INTEGER UNIQUE NOT NULL,
           started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL,
@@ -69,7 +73,8 @@ def advance(clock=None):
                 c.execute('INSERT INTO phase4r_sources VALUES (?,?)', (row['id'], json.dumps(dict(row))))
             transition(c, '4r', boundary, {'repeats': REPEATS, 'phase5_limit': LIMIT, 'missing': 'not imputed', 'phase4_boundary': '96th GPT target + completed hour', 'rv': '100*sqrt(sum(12 consecutive 5m log returns squared)); preceding close included', 'sd': 'sample', 'agreement': 'modal argmax frequency', 'paired': 'timestamp intersection'})
         n = c.execute('SELECT count(*) FROM phase4r_sources').fetchone()[0]
-        done = c.execute("SELECT count(*) FROM phase4r_runs WHERE status='complete'").fetchone()[0]
+        statuses = ('complete','invalid') if invalid_policy_enabled(c) else ('complete',)
+        done = c.execute('SELECT count(*) FROM phase4r_runs WHERE status IN ('+','.join('?' for _ in statuses)+')',statuses).fetchone()[0]
         if done != n * REPEATS:
             return '4r'
         transition(c, '5', (int(clock)//3600+1)*3600, {'limit': LIMIT, 'predictor': 'openai', 'baseline': 'previous-hour RV', 'rv': 'identical to Phase 4', 'validation': 'finite non-negative numeric; no upper bound or clipping', 'stop': '96 successful live predictions; no optional stopping'})
@@ -126,7 +131,7 @@ def run_repeats(call=class_call, budget=20):
             with database() as c:
                 c.execute('BEGIN IMMEDIATE')
                 row = c.execute('SELECT status FROM phase4r_runs WHERE source_id=? AND repeat_no=?', (source['id'], repeat)).fetchone()
-                if row and row[0] == 'complete':
+                if row and (row[0] == 'complete' or (row[0] == 'invalid' and invalid_policy_enabled(c))):
                     continue
                 if row and row[0] != 'retry_authorized':
                     raise RuntimeError('Uncertain/failed API attempt requires reconciliation; see NEXT_STAGES.md')
@@ -146,9 +151,37 @@ def run_repeats(call=class_call, budget=20):
                     c.execute("UPDATE phase4r_runs SET status='complete',completed_at=?,p_quiet=?,p_normal=?,p_active=?,argmax_class=?,model_version=?,raw_json=? WHERE source_id=? AND repeat_no=?", (now(), *p, winner(p), model, raw, source['id'], repeat))
             except Exception as exc:
                 with database() as c:
-                    c.execute("UPDATE phase4r_runs SET status='failed',error=?,model_version=?,raw_json=? WHERE source_id=? AND repeat_no=?", (str(exc), getattr(exc, 'model_version', model), getattr(exc, 'raw_json', raw), source['id'], repeat))
-                raise
+                    invalid = invalid_policy_enabled(c) and isinstance(exc, InvalidClassResponse)
+                    c.execute("UPDATE phase4r_runs SET status=?,error=?,model_version=?,raw_json=?,completed_at=? WHERE source_id=? AND repeat_no=?", ('invalid' if invalid else 'failed', str(exc), getattr(exc, 'model_version', model), getattr(exc, 'raw_json', raw), now() if invalid else None, source['id'], repeat))
+                if not invalid:
+                    raise
+                print('Phase 4R invalid response recorded; continuing:', source['id'], repeat, str(exc), flush=True)
             count += 1
+
+def invalid_policy_enabled(c):
+    return c.execute("SELECT 1 FROM experiment_transitions WHERE stage='4r-invalid-policy'").fetchone() is not None
+
+
+def enable_invalid_policy():
+    """User-approved amendment: terminal invalid responses, no replacement calls."""
+    with database() as c:
+        c.execute('BEGIN IMMEDIATE')
+        transition(c, '4r-invalid-policy', int(time.time()), {
+            'approved': '2026-10-05', 'invalid_response': 'record and continue; no retries',
+            'completion': 'all planned slots complete or invalid',
+            'scoring': 'only 10-valid-response ensembles; report excluded snapshots',
+            'uncertain_requests': 'remain blocked', 'prior_retry': 'retained in separate audit'})
+        for row in c.execute("SELECT * FROM phase4r_runs WHERE status='failed'").fetchall():
+            # Only identifiable returned-response validation failures are eligible.
+            known_probability_error = row['error'] in ('Probabilities must sum to one', 'Invalid class probabilities')
+            known_saved_response = row['raw_json'] is not None
+            approved_original = row['source_id']==77 and row['repeat_no']==8 and row['predictor']=='jev' and known_probability_error
+            if not ((known_probability_error and known_saved_response) or approved_original):
+                continue
+            c.execute('INSERT OR IGNORE INTO phase4r_invalid_audit VALUES (?,?,?,?)',
+                      (row['source_id'],row['repeat_no'],now(),json.dumps(dict(row))))
+            c.execute("UPDATE phase4r_runs SET status='invalid',completed_at=? WHERE source_id=? AND repeat_no=?", (now(),row['source_id'],row['repeat_no']))
+
 
 def authorize_approved_retry():
     """One user-approved exception only: Jev source 77, repeat 8.

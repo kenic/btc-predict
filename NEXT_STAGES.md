@@ -173,3 +173,48 @@ specified failed case, then processes remaining repeats sequentially. Keep SSH
 connected, or run inside your existing terminal session manager. Once complete,
 Phase 5 is enabled for the next valid hourly cycle; recovery does not itself
 issue Phase 5 predictions. Restart `btc-web.service` to show retry audit data.
+
+## Approved invalid-response policy amendment — 2026-10-05
+
+The user requested recording invalid returned probabilities and continuing to
+subsequent planned slots instead of retrying or halting the whole experiment.
+This explicitly replaces the earlier requirement that all ten samples succeed
+before 4R can finish. The ten planned slots remain fixed. Returned responses that
+fail validation are terminal `invalid` slots; raw response, returned model, error
+and timestamps are retained. There is no normalization, zero-fill, backfill or
+automatic replacement. The earlier one-call retry exception stays in its audit
+and must be reported separately from the planned slot count.
+
+The policy is activated explicitly by `continue_4r.py`, under the shared worker
+lock, and persists in the additive `4r-invalid-policy` transition marker. Merely
+updating code does not activate it. Existing identifiable failed probability
+validation responses are archived verbatim in `phase4r_invalid_audit` before
+marking their slots invalid, without another API call. Source 77/repeat 8's known
+Jev probability failure is also eligible even if the original raw response was
+not captured. Unknown errors and uncertain `started` calls are not converted.
+Transport/provider exceptions still halt for reconciliation; no automatic retry.
+
+Completion means all planned slots are `complete` or `invalid`. Then Phase 5
+starts on the next valid hourly cycle. Eligible source n remains GPT 96 / Jev 95
+if those are the manifest counts. Dashboard progress separates valid completed,
+invalid and processed slots, and reports snapshots excluded due to invalid
+responses. Means/SD/ranges on partial groups use valid responses only. Brier and
+paired comparisons require all ten valid responses for each scored snapshot;
+invalid-containing snapshots do not get a nine-run ensemble score disguised as
+a ten-run result. Evaluated and paired evaluated n may therefore be smaller.
+
+Server update and continuation (from `/opt/btc-predict`):
+
+```sh
+git fetch origin
+git restore --source=origin/phase4r-phase5 --worktree -- next_stages.py next_stage_views.py ui.py continue_4r.py test_next_stages.py NEXT_STAGES.md
+.venv/bin/python -m unittest test_phase4 test_phase4_views test_next_stages -q
+sudo systemctl restart btc-web.service
+.venv/bin/python -u continue_4r.py
+```
+
+Use this continuation script rather than `recover_4r.py`: it makes no new retry
+request for the failed slot. Keep SSH connected during the bulk run. Existing
+hourly/optional repeat workers honor the persisted policy afterwards. The worker
+lock prevents simultaneous model calls. Original Phase 4 and Phase 5 design,
+probability validation tolerance and valid probability values remain unchanged.

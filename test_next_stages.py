@@ -193,6 +193,54 @@ class NextStagesTests(unittest.TestCase):
         self.assertFalse(stages.authorize_approved_retry())
         with self.assertRaises(RuntimeError): stages.run_repeats(self.call)
 
+    def test_invalid_policy_continues_excludes_snapshot_and_enables5(self):
+        stages.advance(self.boundary+3600)
+        stages.enable_invalid_policy()
+        calls=[]
+        def call(source):
+            calls.append(source['id'])
+            if source['id']==100 and calls.count(100)==1:
+                raise stages.InvalidClassResponse(ValueError('Probabilities must sum to one'),'jev','bad probabilities')
+            return self.call(source)
+        stages.run_repeats(call,budget=2000)
+        self.assertEqual(len(calls),1910)
+        self.assertEqual(stages.advance(self.boundary+7200),'5')
+        stages.run_repeats(lambda source:self.fail('replayed invalid or valid slot'),budget=2000)
+        report=views.report()
+        self.assertEqual(report['phase4r']['jev']['n'],95)
+        self.assertEqual(report['phase4r']['jev']['invalid_runs'],1)
+        self.assertEqual(report['phase4r']['jev']['processed_runs'],950)
+        self.assertEqual(report['phase4r']['jev']['evaluated_n'],94)
+        self.assertEqual(report['paired_n'],95)
+        self.assertEqual(report['paired_evaluated_n'],94)
+        with stages.database() as c:
+            row=c.execute("SELECT * FROM phase4r_runs WHERE status='invalid'").fetchone()
+            self.assertEqual(row['raw_json'],'bad probabilities')
+            self.assertIsNotNone(row['completed_at'])
+
+    def test_invalid_policy_does_not_skip_transport_failures(self):
+        stages.advance(self.boundary+3600)
+        stages.enable_invalid_policy()
+        with self.assertRaises(RuntimeError):
+            stages.run_repeats(lambda source:(_ for _ in ()).throw(RuntimeError('timeout')))
+        stages.enable_invalid_policy()
+        with self.assertRaises(RuntimeError):
+            stages.run_repeats(lambda source:self.fail('unsafe transport retry'))
+        self.assertEqual(stages.advance(self.boundary+7200),'4r')
+
+    def test_policy_adoption_preserves_prior_failure_without_call(self):
+        stages.advance(self.boundary+3600)
+        with stages.database() as c:
+            c.execute("INSERT INTO phase4r_runs(source_id,repeat_no,predictor,target_candle_time,status,started_at,error,raw_json) VALUES (77,8,'jev',0,'failed','original','Probabilities must sum to one','original bad response')")
+        stages.enable_invalid_policy()
+        stages.enable_invalid_policy()
+        with stages.database() as c:
+            original=json.loads(c.execute('SELECT original_run_json FROM phase4r_invalid_audit').fetchone()[0])
+            self.assertEqual(original['status'],'failed')
+            self.assertEqual(original['raw_json'],'original bad response')
+            self.assertEqual(c.execute('SELECT count(*) FROM phase4r_invalid_audit').fetchone()[0],1)
+            self.assertEqual(c.execute('SELECT status FROM phase4r_runs WHERE source_id=77 AND repeat_no=8').fetchone()[0],'invalid')
+
     def test_routes(self):
         client=app.app.test_client()
         for route in ('/next-stages/','/analyze/?phase=phase4r','/analyze/?phase=phase5','/next-stages/data.json'):
