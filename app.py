@@ -1171,6 +1171,9 @@ def analysis_bar(stats):
 
 @app.route("/analyze/")
 def analyze():
+    if request.args.get("phase") == "phase6":
+        from phase6_views import page
+        return page(DB_PATH, analysis=True)
     if request.args.get("phase") in ("phase4r", "phase5"):
         from next_stage_views import page
         return page(analysis=True, section="regression" if request.args.get("phase") == "phase5" else "repeated")
@@ -1257,6 +1260,17 @@ def volatility_dashboard():
 def repeated_dashboard():
     from repeat_views import page
     return page()
+
+@app.route("/direction-active/")
+@app.route("/phase6/")
+def active_direction_dashboard():
+    from phase6_views import page
+    return page(DB_PATH)
+
+@app.route("/direction-active/data.json")
+def active_direction_data():
+    from phase6_views import report
+    return report(DB_PATH)
 
 @app.route("/regression/")
 def regression_dashboard():

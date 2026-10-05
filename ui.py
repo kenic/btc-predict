@@ -3,12 +3,12 @@ from html import escape
 
 NAV = (('current', '/', 'Current'), ('direction', '/direction/', 'Direction'),
        ('volatility', '/volatility/', 'Volatility'), ('repeated', '/repeated/', 'Repeated'),
-       ('regression', '/regression/', 'Regression'), ('analysis', '/analyze/', 'Analysis'))
+       ('regression', '/regression/', 'Regression'), ('phase6', '/direction-active/', 'Active Direction'), ('analysis', '/analyze/', 'Analysis'))
 
 
 def analysis_filters(phase):
     choices = (('all', 'All direction phases'), ('phase1', 'Phase 1'), ('phase2', 'Phase 2'),
-               ('phase3', 'Phase 3'), ('phase4', 'Volatility'), ('phase4r', 'Repeated'), ('phase5', 'Regression'))
+               ('phase3', 'Phase 3'), ('phase4', 'Volatility'), ('phase4r', 'Repeated'), ('phase5', 'Regression'), ('phase6', 'Active Direction'))
     return '<nav class="filters" aria-label="Analysis experiment">' + ''.join(
         f'<a href="/analyze/?phase={key}"' + (' aria-current="page"' if key == phase else '') + f'>{label}</a>'
         for key, label in choices) + '</nav>'

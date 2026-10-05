@@ -94,7 +94,7 @@ def class_call(source):
     prompt = instructions(config)
     if source['predictor'] == 'openai':
         from openai import OpenAI
-        response = OpenAI(max_retries=0).responses.create(model=source['model_version'], input=prompt+
+        response = OpenAI(max_retries=0, **({'timeout': source['timeout']} if 'timeout' in source else {})).responses.create(model=source['model_version'], input=prompt+
             '\nReturn JSON only: {"p_quiet":0.33,"p_normal":0.34,"p_active":0.33,"reason":"short explanation"}\nMARKET DATA:\n'+source['context'])
         metadata = response.model_dump_json()
         model = getattr(response, 'model', source['model_version'])
@@ -302,8 +302,24 @@ def main():
             advance()
         else:
             from predict_gpt import get_prediction_cutoff
-            evaluate_regression()
-            run_regression(get_prediction_cutoff())
+            # Phase 6 owns only additive tables. Both experiments progress even
+            # when the other fails, under the same cross-process scheduler lock.
+            from concurrent.futures import ThreadPoolExecutor
+            from phase6 import cycle as phase6_cycle
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                phase6_future = pool.submit(phase6_cycle)
+                failures = []
+                try:
+                    evaluate_regression()
+                    run_regression(get_prediction_cutoff())
+                except Exception as exc:
+                    failures.append(exc)
+                try:
+                    phase6_future.result()
+                except Exception as exc:
+                    failures.append(exc)
+                if failures:
+                    raise RuntimeError(str(failures))
 
 if __name__ == '__main__':
     main()
