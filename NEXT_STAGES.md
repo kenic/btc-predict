@@ -146,3 +146,30 @@ No automatic duplicate call is made for any persisted key.
 Rollback: pause scheduler/worker first. Restore previous code and restart the
 verified dashboard unit. Keep all additive tables. Do not reactivate the old
 Phase 4 predictors after the common boundary: that would extend Jev's experiment.
+
+## Approved recovery exception — 2026-10-05
+
+The user approved exactly one replacement call for Jev source 77, repeat 8,
+whose original attempt failed with `Probabilities must sum to one`.
+This source has ten valid samples plus one failed attempt; the exception is
+reported in `retry_exceptions` on the dashboard/JSON output. The original failed
+row is archived verbatim in the additive `phase4r_retry_audit` table before its
+repeat slot is authorized for replacement. No successful repeat is replayed.
+Running recovery again does not grant a second replacement. New failures still
+halt for review. The original failure's raw response was not captured by the
+old code and cannot be reconstructed. The updated adapter retains raw provider
+responses and returned model before validating probabilities; it does not relax
+validation or normalize outputs.
+
+After updating server code to this commit, run from `/opt/btc-predict`:
+
+```sh
+.venv/bin/python -m unittest test_phase4 test_phase4_views test_next_stages -q
+.venv/bin/python -u recover_4r.py
+```
+
+The recovery waits for the shared worker lock, audits and authorizes only the
+specified failed case, then processes remaining repeats sequentially. Keep SSH
+connected, or run inside your existing terminal session manager. Once complete,
+Phase 5 is enabled for the next valid hourly cycle; recovery does not itself
+issue Phase 5 predictions. Restart `btc-web.service` to show retry audit data.

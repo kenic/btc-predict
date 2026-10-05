@@ -32,6 +32,11 @@ def migrate():
           p_quiet REAL, p_normal REAL, p_active REAL, argmax_class TEXT,
           model_version TEXT, raw_json TEXT, error TEXT,
           PRIMARY KEY(source_id,repeat_no));
+        CREATE TABLE IF NOT EXISTS phase4r_retry_audit (
+          source_id INTEGER NOT NULL, repeat_no INTEGER NOT NULL,
+          authorized_at TEXT NOT NULL, reason TEXT NOT NULL,
+          original_run_json TEXT NOT NULL,
+          PRIMARY KEY(source_id,repeat_no));
         CREATE TABLE IF NOT EXISTS phase5_predictions (
           id INTEGER PRIMARY KEY, target_candle_time INTEGER UNIQUE NOT NULL,
           started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL,
@@ -70,6 +75,14 @@ def advance(clock=None):
         transition(c, '5', (int(clock)//3600+1)*3600, {'limit': LIMIT, 'predictor': 'openai', 'baseline': 'previous-hour RV', 'rv': 'identical to Phase 4', 'validation': 'finite non-negative numeric; no upper bound or clipping', 'stop': '96 successful live predictions; no optional stopping'})
         return '5'
 
+class InvalidClassResponse(ValueError):
+    """Validation failure retaining the exact provider response for audit."""
+    def __init__(self, error, model, raw):
+        super().__init__(str(error))
+        self.model_version = model
+        self.raw_json = raw
+
+
 def class_call(source):
     from phase4_runner import instructions
     config = json.loads(source['config_json'])
@@ -78,12 +91,17 @@ def class_call(source):
         from openai import OpenAI
         response = OpenAI(max_retries=0).responses.create(model=source['model_version'], input=prompt+
             '\nReturn JSON only: {"p_quiet":0.33,"p_normal":0.34,"p_active":0.33,"reason":"short explanation"}\nMARKET DATA:\n'+source['context'])
-        raw = response.output_text.strip()
-        if raw.startswith('```'):
-            raw = '\n'.join(raw.splitlines()[1:-1])
-        result = json.loads(raw)
-        p = probabilities([result['p_'+label.lower()] for label in CLASSES])
-        return p, getattr(response, 'model', source['model_version']), response.model_dump_json()
+        metadata = response.model_dump_json()
+        model = getattr(response, 'model', source['model_version'])
+        try:
+            raw = response.output_text.strip()
+            if raw.startswith('```'):
+                raw = '\n'.join(raw.splitlines()[1:-1])
+            result = json.loads(raw)
+            p = probabilities([result['p_'+label.lower()] for label in CLASSES])
+        except Exception as exc:
+            raise InvalidClassResponse(exc, model, metadata) from exc
+        return p, model, metadata
     import os
     from typesafe_sdk import TypeSafeClient, Choice, RetryPolicy
     response = TypeSafeClient(api_key=os.environ['TYPESAFE_API_KEY'], timeout=120.0, retry=RetryPolicy(max_retries=0)).system_one(
@@ -92,8 +110,12 @@ def class_call(source):
                 'QUIET': f"RV < {config['quiet_upper']:.17g}%",
                 'NORMAL': f"{config['quiet_upper']:.17g}% <= RV < {config['active_lower']:.17g}%",
                 'ACTIVE': f"RV >= {config['active_lower']:.17g}%"})})
-    p = probabilities([response.answers['volatility'].probabilities[label] for label in CLASSES])
-    return p, response.model, response.model_dump_json()
+    metadata = response.model_dump_json()
+    try:
+        p = probabilities([response.answers['volatility'].probabilities[label] for label in CLASSES])
+    except Exception as exc:
+        raise InvalidClassResponse(exc, response.model, metadata) from exc
+    return p, response.model, metadata
 
 def run_repeats(call=class_call, budget=20):
     with database() as c:
@@ -104,13 +126,19 @@ def run_repeats(call=class_call, budget=20):
             with database() as c:
                 c.execute('BEGIN IMMEDIATE')
                 row = c.execute('SELECT status FROM phase4r_runs WHERE source_id=? AND repeat_no=?', (source['id'], repeat)).fetchone()
-                if row:
-                    if row[0] != 'complete':
-                        raise RuntimeError('Uncertain/failed API attempt requires reconciliation; see NEXT_STAGES.md')
+                if row and row[0] == 'complete':
                     continue
+                if row and row[0] != 'retry_authorized':
+                    raise RuntimeError('Uncertain/failed API attempt requires reconciliation; see NEXT_STAGES.md')
                 if count >= budget:
                     return
-                c.execute('INSERT INTO phase4r_runs(source_id,repeat_no,predictor,target_candle_time,status,started_at) VALUES (?,?,?,?,?,?)', (source['id'], repeat, source['predictor'], source['target_candle_time'], 'started', now()))
+                if row:
+                    if not c.execute('SELECT 1 FROM phase4r_retry_audit WHERE source_id=? AND repeat_no=?', (source['id'],repeat)).fetchone():
+                        raise RuntimeError('Retry authorization audit missing')
+                    c.execute("UPDATE phase4r_runs SET status='started',started_at=?,completed_at=NULL,error=NULL,raw_json=NULL,model_version=NULL WHERE source_id=? AND repeat_no=?", (now(), source['id'], repeat))
+                else:
+                    c.execute('INSERT INTO phase4r_runs(source_id,repeat_no,predictor,target_candle_time,status,started_at) VALUES (?,?,?,?,?,?)', (source['id'], repeat, source['predictor'], source['target_candle_time'], 'started', now()))
+            model = raw = None
             try:
                 p, model, raw = call(source)
                 p = probabilities(p)
@@ -118,9 +146,28 @@ def run_repeats(call=class_call, budget=20):
                     c.execute("UPDATE phase4r_runs SET status='complete',completed_at=?,p_quiet=?,p_normal=?,p_active=?,argmax_class=?,model_version=?,raw_json=? WHERE source_id=? AND repeat_no=?", (now(), *p, winner(p), model, raw, source['id'], repeat))
             except Exception as exc:
                 with database() as c:
-                    c.execute("UPDATE phase4r_runs SET status='failed',error=? WHERE source_id=? AND repeat_no=?", (str(exc), source['id'], repeat))
+                    c.execute("UPDATE phase4r_runs SET status='failed',error=?,model_version=?,raw_json=? WHERE source_id=? AND repeat_no=?", (str(exc), getattr(exc, 'model_version', model), getattr(exc, 'raw_json', raw), source['id'], repeat))
                 raise
             count += 1
+
+def authorize_approved_retry():
+    """One user-approved exception only: Jev source 77, repeat 8.
+
+    Audit the old failed row before permitting one replacement API call.
+    Re-running this function cannot grant another retry.
+    """
+    with database() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if c.execute('SELECT 1 FROM phase4r_retry_audit WHERE source_id=77 AND repeat_no=8').fetchone():
+            return False
+        row = c.execute('SELECT * FROM phase4r_runs WHERE source_id=77 AND repeat_no=8').fetchone()
+        if row is None or row['predictor'] != 'jev' or row['status'] != 'failed' or row['error'] != 'Probabilities must sum to one':
+            raise RuntimeError('Row does not match the user-approved validation failure')
+        c.execute('INSERT INTO phase4r_retry_audit VALUES (77,8,?,?,?)',
+                  (now(), 'User approved one additional call on 2026-10-05: 10 valid samples plus one failed validation; no normalization', json.dumps(dict(row))))
+        c.execute("UPDATE phase4r_runs SET status='retry_authorized' WHERE source_id=77 AND repeat_no=8")
+        return True
+
 
 def validate_rv(value):
     if isinstance(value, bool) or not isinstance(value, (int,float)) or not math.isfinite(value) or value < 0:

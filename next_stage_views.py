@@ -32,6 +32,8 @@ def report():
         live = {r['id']: dict(r) for r in c.execute('SELECT * FROM volatility_predictions')}
         phase5 = [dict(r) for r in c.execute('SELECT * FROM phase5_predictions ORDER BY target_candle_time')]
         transitions = [dict(r) for r in c.execute('SELECT * FROM experiment_transitions')]
+        has_audit = c.execute("SELECT 1 FROM sqlite_master WHERE name='phase4r_retry_audit'").fetchone()
+        retries = [dict(r) for r in c.execute('SELECT * FROM phase4r_retry_audit')] if has_audit else []
     diagnostics = []
     for source in sources:
         complete = [r for r in runs if r['source_id']==source['id'] and r['status']=='complete']
@@ -59,7 +61,7 @@ def report():
     paired_targets = {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='openai'} & {d['target'] for d in diagnostics if 'ensemble_brier' in d and d['predictor']=='jev'}
     paired = {model: {key:statistics.mean(d[key] for d in diagnostics if d['predictor']==model and d['target'] in paired_targets) if paired_targets else None for key in ('single_brier','ensemble_brier')} for model in ('openai','jev')}
     evaluated = [r for r in phase5 if r['evaluated_at'] is not None]
-    return {'transitions':transitions,'phase4r':summaries,'paired_n':len(common),'paired_evaluated_n':len(paired_targets),'paired_scores':paired,'diagnostics':diagnostics,'failed_or_uncertain_runs':[r for r in runs if r['status']!='complete'],'phase5':{'predicted_n':sum(r['status']=='complete' for r in phase5),'attempted_n':len(phase5),'model':metrics(evaluated,'predicted_rv'),'previous_hour_baseline':metrics(evaluated,'previous_rv'),'predicted_vs_actual':evaluated,'pending':[r for r in phase5 if r['evaluated_at'] is None]}}
+    return {'retry_exceptions':retries,'transitions':transitions,'phase4r':summaries,'paired_n':len(common),'paired_evaluated_n':len(paired_targets),'paired_scores':paired,'diagnostics':diagnostics,'failed_or_uncertain_runs':[r for r in runs if r['status']!='complete'],'phase5':{'predicted_n':sum(r['status']=='complete' for r in phase5),'attempted_n':len(phase5),'model':metrics(evaluated,'predicted_rv'),'previous_hour_baseline':metrics(evaluated,'previous_rv'),'predicted_vs_actual':evaluated,'pending':[r for r in phase5 if r['evaluated_at'] is None]}}
 
 
 def page(analysis=False, section=None):

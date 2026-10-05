@@ -158,6 +158,41 @@ class NextStagesTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             stages.run_regression(7200,clock=7200,builder=never)
 
+    def test_approved_retry_audits_and_only_sends_once(self):
+        stages.advance(self.boundary+3600)
+        stages.run_repeats(self.call,budget=2000)
+        with stages.database() as c:
+            c.execute("UPDATE phase4r_runs SET predictor='jev',status='failed',error='Probabilities must sum to one',completed_at=NULL WHERE source_id=77 AND repeat_no=8")
+            before=[tuple(r) for r in c.execute("SELECT * FROM phase4r_runs WHERE NOT(source_id=77 AND repeat_no=8)")]
+        self.assertTrue(stages.authorize_approved_retry())
+        self.assertFalse(stages.authorize_approved_retry())
+        calls=[]
+        stages.run_repeats(lambda source:(calls.append(source['id']) or [.2,.3,.5],'version','raw'),budget=2000)
+        self.assertEqual(calls,[77])
+        stages.run_repeats(lambda source:self.fail('duplicate retry'),budget=2000)
+        with stages.database() as c:
+            original=json.loads(c.execute('SELECT original_run_json FROM phase4r_retry_audit').fetchone()[0])
+            self.assertEqual(original['error'],'Probabilities must sum to one')
+            self.assertEqual(original['status'],'failed')
+            self.assertEqual(before,[tuple(r) for r in c.execute("SELECT * FROM phase4r_runs WHERE NOT(source_id=77 AND repeat_no=8)")])
+        self.assertEqual(len(views.report()['retry_exceptions']),1)
+
+    def test_invalid_response_metadata_retained_and_no_second_retry(self):
+        stages.advance(self.boundary+3600)
+        stages.run_repeats(self.call,budget=2000)
+        with stages.database() as c:
+            c.execute("UPDATE phase4r_runs SET predictor='jev',status='failed',completed_at=NULL,error='Probabilities must sum to one' WHERE source_id=77 AND repeat_no=8")
+        stages.authorize_approved_retry()
+        def fail(source):
+            raise stages.InvalidClassResponse(ValueError('Probabilities must sum to one'),'version','invalid response')
+        with self.assertRaises(ValueError): stages.run_repeats(fail,budget=1)
+        with stages.database() as c:
+            row=c.execute("SELECT * FROM phase4r_runs WHERE status='failed' AND raw_json IS NOT NULL").fetchone()
+            self.assertEqual(row['raw_json'],'invalid response')
+            self.assertEqual(row['model_version'],'version')
+        self.assertFalse(stages.authorize_approved_retry())
+        with self.assertRaises(RuntimeError): stages.run_repeats(self.call)
+
     def test_routes(self):
         client=app.app.test_client()
         for route in ('/next-stages/','/analyze/?phase=phase4r','/analyze/?phase=phase5','/next-stages/data.json'):
