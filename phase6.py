@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from phase4 import DB_PATH, ROOT, config_hash, now
 from volatility import CLASSES, probabilities, winner
-from phase6_methods import BASE_METHODS, METHODS, VERSION, extract, rule, output, ensembles, logistic
+from phase6_methods import BASELINES, DIRECTION_METHODS, DIRECTION_ENSEMBLES, RANDOM_SEED, BASE_METHODS, METHODS, VERSION, extract, rule, output, ensembles, logistic
 
 
 def digest(text):
@@ -61,23 +61,29 @@ def design(volatility_config, model):
     return dict(version=VERSION, gate={'predictor': 'openai', 'single': 'ACTIVE',
         'repeats': 10, 'modal': 'ACTIVE', 'active_votes_min': 8, 'valid_required': 10,
         'tie_order': list(CLASSES), 'volatility_config': volatility_config, 'model': model},
-        methods={m: VERSION for m in METHODS}, target='close(target+1h) / reference completed 1h close - 1',
+        methods={m: VERSION for m in METHODS},
+        categories={'Baselines': list(BASELINES), 'Direction Methods': list(DIRECTION_METHODS),
+                    'Direction Ensembles': list(DIRECTION_ENSEMBLES)}, target='close(target+1h) / reference completed 1h close - 1',
         target_units='percent', flat='unscored accuracy/Brier; zero PnL',
         snapshot='exact Phase 4/Phase 3 stored text; deterministic rounded fields',
         stop={'accepted_gates': 96, 'optional_stopping': False},
         deadline_seconds=600, provider_timeout_seconds=120, repeat_workers=10, missing='no retry, backfill, imputation or replacement',
         rules={'momentum_1h': 'previous close-to-close 1h sign; zero unavailable',
                'momentum_short': 'sign(mean(5m and 15m returns from 5m frame))',
-               'reversal_1h': 'opposite previous 1h return sign', 'always_up': 'UP',
+               'reversal_1h': 'opposite previous 1h return sign; zero unavailable', 'always_up': 'UP',
+               'always_down': 'DOWN', 'random_50_50': 'one fixed-seed SHA-256 first-bit draw per target; 0=UP, 1=DOWN',
                'breakout': 'last 5m close > prior 11 highs / < prior 11 lows; else unavailable',
                'trend': 'SMA20/SMA50 and normalized MACD histogram sign vote; tie unavailable',
                'order_flow': '60m aggressive buy_ratio minus 0.5 sign',
                'order_book': '60m imb10 minus 0.5 and micro_offset sign vote; tie unavailable'},
+        random_baseline={'seed': RANDOM_SEED, 'key': 'seed:target',
+                         'probabilities': 'none; random direction is saved once per target',
+                         'ensemble_member': False},
         logistic={'training': 'expanding prior evaluated phase2/3 and phase6 snapshots; deduplicate target',
                   'minimum': 100, 'minimum_per_class': 10, 'strict': 'target+3600 < cutoff AND evaluated_at < cutoff',
                   'standardize': 'training only', 'l2': .01, 'steps': 400, 'learning_rate': .1},
         ensemble={'vote_minimum': 3, 'probability_minimum': 2, 'vote_tie': 'unavailable',
-                  'probability_tie': 'UP', 'members': list(BASE_METHODS), 'rule_probabilities': 'none'},
+                  'probability_tie': 'abstain', 'members': list(DIRECTION_METHODS), 'rule_probabilities': 'none'},
         simulation='unit long/short for target 1h; no fees, spread, leverage or sizing',
         paired={'minimum_common_events': 20, 'test': 'two-sided exact McNemar; exploratory, unadjusted'},
         framing='ACTIVE is not assumed easier; alternative signals seek prospective conditional edge')
@@ -116,7 +122,7 @@ def historical_frequency(c):
         result['gate_rate'] = result['accepted']/hours
         if result['accepted']:
             result['estimated_days_for_96'] = 96/result['gate_rate']/24
-    result['interpretation'] = 'Historical repeat audit only; missing ensembles excluded; future frequency unknown'
+    result['interpretation'] = 'Historical repeat audit only; incomplete 10-shot repeat agreement results excluded; future frequency unknown'
     return result
 
 
@@ -339,7 +345,7 @@ def run(target, clock=None, builder=None, class_call=None, gpt_call=None):
                     return gpt_call(context,cfg['gate']['model'])
                 if method == 'logistic':
                     return logistic(f,training,target)
-                return rule(method,f)
+                return rule(method,f,target=target)
             except Exception as exc:
                 return output(reason='Method failed: '+str(exc))
         def run_method(method):

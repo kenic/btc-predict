@@ -2,10 +2,13 @@
 
 Development branch: `phase6`, based on `phase4r-phase5` at
 `624eae740cd3a36b81d4d099eb0a3f54be43e12f`, tagged `phase6-base`.
-The verified implementation release is tagged `phase6-start`. This release tag
-identifies deployable code; the actual experiment start is a separate explicit
-server action, persisted with timestamp, first future target, config SHA-256,
-Git commit and implementation hashes. Deploying code does not start predictions.
+`phase6-start` records the original v1 implementation release and remains
+unchanged. The current branch contains the requested pre-start v2 specification:
+comparison-only baselines, explicit Direction ensemble membership and unbiased
+ensemble tie handling. The actual experiment start is a separate explicit server
+action, persisted with timestamp, first future target, config SHA-256, Git commit
+and implementation hashes. Deploying code does not start predictions. This update
+does not create, replace or reset any start record.
 
 ## Frozen design
 
@@ -42,22 +45,83 @@ Reference price is the reference close displayed in that exact snapshot.
 The target remains next completed 1h close versus reference completed 1h close;
 UP/DOWN/FLAT semantics match Phases 1–3. Realized target candle is saved verbatim.
 
-Methods (all `phase6-v1`):
+## Predictor categories (`phase6-v2`)
 
-- OpenAI probability prediction with Phase 3 information and direction semantics.
-- Sign of previous 1h close-to-close return; opposite sign reversal; always-UP.
-- Short momentum: sign of mean 5m and 15m returns from the 5m frame.
-- Breakout: final completed 5m close above prior eleven 5m highs or below their
-  lows; no breakout abstains.
-- Trend: equal sign vote of SMA20 minus SMA50 and MACD histogram; tie abstains.
-- Order flow: sign of preceding 60m aggressive BTC-volume buy ratio minus 0.5.
-- Order book: equal sign vote of preceding 60m top10 imbalance minus 0.5 and
-  microprice offset; tie abstains.
-- Expanding L2 logistic regression described below.
-- Majority-vote ensemble (Direction ensemble) of eligible base methods (at least three; tie abstains), and
-  Probability-average ensemble (Direction ensemble; at least two actual probability methods; 0.5 predicts UP).
-  Direction ensembles never include other Direction ensembles or assign invented probabilities to
-  rules. Membership is saved. All base methods receive equal weight.
+### A. Baselines — comparison only
+
+Baselines never participate in either Direction ensemble, even when available.
+
+- **Always UP** (`always_up`): always UP.
+- **Always DOWN** (`always_down`): always DOWN.
+- **Random 50/50** (`random_50_50`): one reproducible direction per target hour.
+  The fixed seed is `phase6-random-50-50-v1`. Compute SHA-256 of the UTF-8 string
+  `seed:target` (target is its integer UTC Unix timestamp). The first bit selects
+  UP for zero, DOWN for one. This is a seeded Bernoulli 50/50 pseudo-random draw,
+  independent of scheduling order, process restarts or prior draws. The selected
+  direction, seed, target, algorithm and full draw hash are saved in the existing
+  prediction row/audit JSON. No baseline probability is invented. No repeated
+  live Monte Carlo runs occur.
+- **1h Momentum Baseline** (`momentum_1h`): previous completed 1h close-to-close
+  return >0 predicts UP; <0 predicts DOWN; exactly zero abstains.
+- **1h Reversal Baseline** (`reversal_1h`): previous completed 1h return >0
+  predicts DOWN; <0 predicts UP; exactly zero abstains.
+
+The existing 1h momentum and reversal rules are unchanged; only their user-facing
+names and comparison-only role are clarified.
+
+### B. Direction Methods
+
+- **GPT / OpenAI** (`gpt`): probability prediction with the existing Phase 3
+  direction features and semantics. Model/provider/retry behavior is unchanged.
+- **Short-horizon Momentum** (`momentum_short`): sign of mean 5m and 15m returns
+  from the 5m frame. This is distinct from 1h Momentum Baseline; its rule is unchanged.
+- **Breakout** (`breakout`): final completed 5m close above prior eleven 5m highs
+  or below their lows; no breakout abstains.
+- **Trend** (`trend`): equal sign vote of SMA20 minus SMA50 and MACD histogram;
+  tie abstains.
+- **Order Flow** (`order_flow`): sign of preceding 60m aggressive BTC-volume buy
+  ratio minus 0.5.
+- **Order Book** (`order_book`): equal sign vote of preceding 60m top10 imbalance
+  minus 0.5 and microprice offset; tie abstains.
+- **Logistic Regression** (`logistic`): unchanged expanding L2 fit described below.
+
+### C. Direction Ensembles
+
+Allowed members are **only** the seven Direction Methods listed above. Always
+UP, Always DOWN, Random 50/50, 1h Momentum Baseline and 1h Reversal Baseline are
+explicitly excluded from both ensembles. Abstaining/failed Direction Methods
+are ineligible. Participating Direction Methods have equal weight; Direction
+ensembles never include other Direction ensembles.
+
+- **Majority-vote Direction Ensemble** (`ensemble_vote`): at least three eligible
+  Direction Methods are required. UP votes > DOWN votes predicts UP; DOWN votes
+  > UP votes predicts DOWN; tie abstains.
+- **Probability-average Direction Ensemble** (`ensemble_probability`): at least
+  two eligible Direction Methods with actual probabilities are required. In the
+  current design those are GPT / OpenAI and Logistic Regression. Do not assign
+  artificial probabilities to rules. Average p_up >0.5 predicts UP; <0.5 predicts
+  DOWN; exactly 0.5 abstains. The tied 0.5/0.5 probabilities are retained for
+  audit, with unavailable status and no discrete direction.
+
+Potential membership is frozen in the config. Actual eligible membership is
+saved per target/ensemble in the existing `audit_json` and displayed in both
+Phase 6 and analysis pages, including unavailable ensembles. Majority UP/DOWN
+vote counts are saved as audit metadata. Minimum membership requirements remain
+three votes / two probability forecasts. Individual GPT/logistic tie conversion
+is unchanged; the specified probability tie change applies only to the Direction
+ensemble.
+
+## Direction target semantics
+
+The target is identical to Phases 1–3, with no epsilon dead-zone:
+
+- **UP**: target completed 1h close > reference completed 1h close.
+- **DOWN**: target completed 1h close < reference completed 1h close.
+- **FLAT**: target completed 1h close == reference completed 1h close.
+
+FLAT is excluded from Accuracy / Brier, and its simple PnL contribution is zero.
+A predictor abstention is excluded from scored N and is never counted as incorrect;
+it reduces coverage. Snapshot/reference rounding and target alignment are unchanged.
 
 Zero, unavailable or non-finite rule signals abstain. Method failures remain
 unavailable with reasons; other methods continue. A prospective gate and method
@@ -76,7 +140,7 @@ are excluded. Phase 1 lacks the required representation and is unavailable for
 training. Historical snapshots are not reconstructed. Newly fetched evaluation
 labels cannot enter a current fit. Training is performed independently at each
 accepted gate, with at least 100 complete labeled hours and ten per class.
-Until then the method, and potentially the Probability-average ensemble (Direction ensemble), are unavailable.
+Until then the method, and potentially the Probability-average Direction Ensemble, are unavailable.
 
 The features are 1h return, 5m return, 15m return, SMA percentage gap, normalized
 MACD histogram, 60m buy ratio, top10 imbalance and microprice offset. Scaling
@@ -84,7 +148,7 @@ uses training data alone; constant columns have scale one. NumPy full-batch
 logistic regression uses 400 deterministic steps, learning rate 0.1 and L2=0.01
 (excluding intercept). No hyperparameter search or interim tuning occurs.
 Training row IDs, count, cutoff, data hash, feature names, means/scales and fitted
-coefficients are saved. This is an interpretable experimental baseline rather
+coefficients are saved. This is an interpretable experimental classifier rather
 than an optimized trading model. No new dependency is required.
 
 Reports show per-method N/correct/accuracy, probability-only Brier and its N,
@@ -95,10 +159,15 @@ coverage and their ACTIVE classification remains unknown. FLAT is excluded
 from accuracy/Brier and contributes zero PnL. Fees, spread and position sizing
 are excluded. Reported metrics can use different N; those counts are explicit.
 
-`/analyze/?phase=phase6` compares all methods/Direction ensembles on common scored events,
+`/analyze/?phase=phase6` compares all methods and Direction ensembles on common scored events,
 including accuracy, PnL and probability-intersection Brier differences. Two-sided
 exact McNemar p-values appear from 20 common events. These multiple comparisons
 are exploratory and unadjusted; they are not confirmation of an edge.
+
+Analysis also shows **theoretical random accuracy = 50%** and the **constant
+p_up = 0.5 binary Brier = 0.25** reference for UP/DOWN labels. These are analysis
+reference values, separate from the saved Random 50/50 direction baseline. They
+do not generate live predictions or add a Monte Carlo predictor.
 
 The research premise is preserved: retrospective ACTIVE direction accuracy in
 Phases 1–3 was approximately OpenAI 34.9% / Jev 41.9%. Phase 6 does not assume
@@ -139,28 +208,60 @@ a new live target. Pending interrupted gates become rejected; interrupted method
 reservations become unavailable. Provider calls cannot be guaranteed exactly
 once across a remote/local crash, but persisted attempts are never reissued.
 
-## Terminology-only UI updates
+## Requested pre-start revision and deployment scope
 
-“Ensemble” refers exclusively to combinations of direction predictors:
-**Direction ensemble**, **Majority-vote ensemble**, or **Probability-average
-ensemble**. Volatility uses **Repeat agreement**, **10-shot repeat agreement**
-and **Repeat modal class**. Internal method IDs and frozen metadata may retain
-legacy identifiers; presentation aliases clarify their meaning without changing
-stored records, configuration hashes or implementation hashes.
+“Repeat agreement” / “10-shot repeat agreement” are repeated classifications by
+the same volatility GPT; **Direction ensemble** combines distinct Direction
+Methods. These are separate concepts. “Ensemble” is reserved for the direction
+combination. The UI/analysis show Volatility Gate, Baselines, Direction Methods
+and Direction Ensembles in that order, with explicit target and abstention help.
 
-For this terminology-only update on an already deployed `phase6` checkout:
+This v2 revision intentionally makes only the requested predictor changes: add
+Always DOWN and reproducible Random 50/50 comparison baselines, exclude all five
+baselines from Direction ensembles, and abstain on a probability-average tie.
+The 8/10 ACTIVE gate, ten repeats, 96 accepted distinct target hours, no optional
+stopping, Phase 5, next-hour target, logistic no-lookahead, no backfill, alignment,
+and provider calls are unchanged. No new experiment ideas are added.
+
+**No DB schema migration is needed for this update** if Phase 6 tables are already
+installed. New method rows and audit data use the existing schema. If not yet
+installed, use the original additive migration in the initial-deployment section
+below. Neither path changes Phase 6 start state.
+
+On the existing Phase 6 deployment, verify that no start record exists, then
+update under the existing scheduler lock:
 
 ```sh
 cd /opt/btc-predict
-git pull --ff-only origin phase6
-.venv/bin/python -m unittest test_phase6 test_ui -q
+git status --short --branch
+git fetch origin phase6
+flock .next-stages.lock sh -eu <<'PHASE6_UPDATE'
+.venv/bin/python - <<'CHECK_START'
+import sqlite3
+c = sqlite3.connect("file:btc.db?mode=ro", uri=True)
+table = c.execute("SELECT 1 FROM sqlite_master WHERE type=? AND name=?", ("table", "phase6_config")).fetchone()
+count = c.execute("SELECT count(*) FROM phase6_config").fetchone()[0] if table else 0
+assert count == 0, "Phase 6 already has a start record; do not overwrite or reset it"
+CHECK_START
+git merge --ff-only origin/phase6
+.venv/bin/python -m unittest test_phase6 test_ui test_next_stages -q
+PHASE6_UPDATE
 sudo systemctl restart btc-web.service
 systemctl is-active btc-web.service
+curl --fail https://btc.kenic.jp/direction-active/data.json
 ```
 
-Only the web service needs restart. No migration, timer/worker restart or new
-`--start` invocation is needed. Keep the existing start state and both release
-tags unchanged. The original deployment steps below apply to initial deployment.
+For a not-yet-started Phase 6 with tables installed, **pull/fast-forward plus
+btc-web restart is sufficient**; holding the lock avoids mixing scheduler
+versions. No DB migration, timer/collector/worker restart, or `--start` invocation
+is part of this update. Existing hourly jobs load v2 on their next run and remain
+inactive for Phase 6 without a start marker. Phase 5 continues unchanged.
+
+If a Phase 6 start record exists, do not reset it or regenerate hashes. The new
+v2 runtime deliberately rejects a v1 frozen design/hash mismatch and will not
+silently adopt new ensemble semantics. This is a pre-start release, not an
+in-place amendment to an already running experiment. Existing release tags stay
+unchanged. Explicit live start remains a separate user-operated action below.
 
 ## User-operated server deployment
 
@@ -224,5 +325,6 @@ preregistration, while Phase 5 can continue. Do not edit method code after start
 Rollback: acquire `.next-stages.lock`, restore the saved prior code commit, and
 restart `btc-web.service`. Preserve all additive tables and their start marker.
 Do not restore an older DB over current live observations or rerun Phase 4.
-Returning to the tagged Phase 6 code resumes only future hours; missing past
-predictions remain missing.
+Restore code compatible with the saved start config/hashes before resuming;
+the original v1 tag cannot resume a v2 experiment. Missing past predictions remain
+missing.

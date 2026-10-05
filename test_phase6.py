@@ -51,10 +51,10 @@ class MethodsTests(unittest.TestCase):
     def test_rules_missing_and_ensembles(self):
         f = methods.extract(snapshot())
         for method in methods.BASE_METHODS:
-            if method in ('gpt','logistic'):
+            if method in ('gpt','logistic','random_50_50'):
                 continue
             result = methods.rule(method,f)
-            self.assertEqual(result['direction'], 'DOWN' if method=='reversal_1h' else 'UP')
+            self.assertEqual(result['direction'], 'DOWN' if method in ('reversal_1h','always_down') else 'UP')
             self.assertIsNone(result['p_up'])
         f['breakout_close']=100
         self.assertEqual(methods.rule('breakout',f)['status'],'unavailable')
@@ -69,6 +69,63 @@ class MethodsTests(unittest.TestCase):
         self.assertIsNone(methods.ensembles({'gpt':results['gpt']})['ensemble_probability']['p_up'])
         for invalid in (True,float('nan'),float('inf'),-.1,1.1,'0.5'):
             with self.assertRaises(ValueError): methods.output(p_up=invalid)
+
+    def test_baselines_and_short_horizon_are_distinct(self):
+        f = methods.extract(snapshot())
+        self.assertEqual(methods.rule('always_up',f)['direction'],'UP')
+        self.assertEqual(methods.rule('always_down',f)['direction'],'DOWN')
+        for previous, momentum, reversal in ((1,'UP','DOWN'),(-1,'DOWN','UP'),(0,None,None)):
+            features = dict(f,return_1h=previous)
+            self.assertEqual(methods.rule('momentum_1h',features)['direction'],momentum)
+            self.assertEqual(methods.rule('reversal_1h',features)['direction'],reversal)
+        f['return_1h'] = -1
+        self.assertEqual(methods.rule('momentum_1h',f)['direction'],'DOWN')
+        self.assertEqual(methods.rule('momentum_short',f)['direction'],'UP')
+        self.assertIn('momentum_1h',methods.BASELINES)
+        self.assertIn('momentum_short',methods.DIRECTION_METHODS)
+        self.assertFalse(set(methods.BASELINES)&set(methods.DIRECTION_METHODS))
+
+    def test_random_baseline_reproducible_per_target_and_seed(self):
+        result = methods.random_baseline(3600)
+        self.assertEqual(result['direction'],'DOWN')
+        self.assertEqual(result['audit']['draw_sha256'],'87a75ac79b21ad3160bb231a80b1ded0654e867f6a32094b2241d0b294712698')
+        self.assertIsNone(result['p_up'])
+        self.assertEqual(result['audit']['seed'],methods.RANDOM_SEED)
+        targets = range(3600,97*3600,3600)
+        forward = {t: methods.random_baseline(t) for t in targets}
+        reverse = {t: methods.random_baseline(t) for t in reversed(targets)}
+        self.assertEqual(forward,reverse)
+        self.assertEqual({v['direction'] for v in forward.values()},{'UP','DOWN'})
+        for invalid in (None,True,1,3600.0):
+            with self.assertRaises(ValueError): methods.random_baseline(invalid)
+
+    def test_ensembles_exclude_every_baseline_and_abstain_on_ties(self):
+        direction_results = {'gpt':methods.output(p_up=.8),'logistic':methods.output(p_up=.2),
+                             'breakout':methods.output('UP'),'momentum_short':methods.output('DOWN')}
+        # Even hypothetical baseline probabilities cannot enter either ensemble.
+        baselines = {m:methods.output(p_up=1) for m in methods.BASELINES}
+        expected = methods.ensembles(direction_results)
+        self.assertEqual(expected,methods.ensembles({**direction_results,**baselines}))
+        self.assertEqual(expected['ensemble_vote']['status'],'unavailable')
+        self.assertIsNone(expected['ensemble_vote']['direction'])
+        self.assertEqual(expected['ensemble_probability']['p_up'],.5)
+        self.assertEqual(expected['ensemble_probability']['status'],'unavailable')
+        self.assertIsNone(expected['ensemble_probability']['direction'])
+        self.assertEqual(expected['ensemble_probability']['audit']['eligible'],['gpt','logistic'])
+        self.assertEqual(expected['ensemble_vote']['audit']['eligible'],sorted(direction_results))
+        only_baselines = methods.ensembles(baselines)
+        self.assertTrue(all(v['status']=='unavailable' and v['audit']['eligible']==[] for v in only_baselines.values()))
+        direction_results['momentum_short'] = methods.output('UP')
+        self.assertEqual(methods.ensembles(direction_results)['ensemble_vote']['direction'],'UP')
+        direction_results['gpt'] = methods.output(p_up=.9)
+        self.assertEqual(methods.ensembles(direction_results)['ensemble_probability']['direction'],'UP')
+        direction_results['gpt'] = methods.output(p_up=.1)
+        self.assertEqual(methods.ensembles(direction_results)['ensemble_probability']['direction'],'DOWN')
+        # Existing minimum membership rules remain fixed.
+        self.assertEqual(methods.ensembles({'gpt':direction_results['gpt'],'breakout':direction_results['breakout']})['ensemble_vote']['status'],'unavailable')
+        self.assertEqual(methods.ensembles({'gpt':direction_results['gpt']})['ensemble_probability']['status'],'unavailable')
+        # Individual GPT/logistic tie behavior is deliberately unchanged.
+        self.assertEqual(methods.output(p_up=.5)['direction'],'UP')
 
     def test_gpt_adapter_probability_validation_and_raw_audit(self):
         import sys
@@ -194,6 +251,62 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT count(*) FROM phase5_predictions').fetchone()[0],0)
             self.assertEqual(c.execute('SELECT count(*) FROM phase4r_runs').fetchone()[0],0)
 
+    def test_random_saved_once_and_direction_membership_audited(self):
+        self.run_hour()
+        expected = methods.random_baseline(3600)
+        with p6.database() as c:
+            random = dict(c.execute("SELECT * FROM phase6_predictions WHERE method='random_50_50'").fetchone())
+            self.assertEqual(random['direction'],expected['direction'])
+            self.assertEqual(json.loads(random['audit_json']),expected['audit'])
+            self.assertEqual(c.execute("SELECT direction FROM phase6_predictions WHERE method='always_down'").fetchone()[0],'DOWN')
+            for ensemble in methods.DIRECTION_ENSEMBLES:
+                audit = json.loads(c.execute('SELECT audit_json FROM phase6_predictions WHERE method=?',(ensemble,)).fetchone()[0])
+                self.assertFalse(set(audit['eligible'])&set(methods.BASELINES))
+        self.run_hour(class_call=lambda s:self.fail('No replay'))
+        with p6.database() as c:
+            self.assertEqual(random,dict(c.execute("SELECT * FROM phase6_predictions WHERE method='random_50_50'").fetchone()))
+        report = views.report(self.db)
+        self.assertEqual(len(report['ensemble_membership']),2)
+        self.assertTrue(all(not set(r['eligible'])&set(methods.BASELINES) for r in report['ensemble_membership']))
+
+    def test_no_start_marker_means_no_calls_or_implicit_start(self):
+        with p6.database() as c:
+            c.execute('DELETE FROM phase6_config')
+        before = self.db.read_bytes()
+        self.run_hour(builder=lambda t:self.fail('Snapshot without start'),
+                      class_call=lambda s:self.fail('Volatility call without start'),
+                      gpt_call=lambda *args:self.fail('Direction call without start'))
+        with app.app.test_client() as client:
+            rendered = client.get('/direction-active/').get_data(as_text=True)
+            self.assertIn('Not started',rendered)
+            for label in methods.METHODS:
+                self.assertIn(views.METHOD_LABELS[label],rendered)
+        self.assertEqual(before,self.db.read_bytes())
+        with p6.database() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM phase6_config').fetchone()[0],0)
+            self.assertEqual(c.execute('SELECT count(*) FROM phase6_events').fetchone()[0],0)
+
+    def test_existing_start_state_is_never_rewritten(self):
+        # Representative existing v1 preregistration; never rewrite its marker.
+        cfg = json.loads(json.dumps(self.cfg))
+        cfg['version'] = 'phase6-v1'
+        cfg['methods'] = {m:'phase6-v1' for m in methods.METHODS if m not in ('always_down','random_50_50')}
+        cfg['ensemble']['members'] = ['gpt','momentum_1h','momentum_short','reversal_1h',
+                                      'always_up','breakout','trend','order_flow','order_book','logistic']
+        cfg['ensemble']['probability_tie'] = 'UP'
+        cfg.pop('categories')
+        cfg.pop('random_baseline')
+        cfg['implementation_hashes'] = {}
+        with p6.database() as c:
+            c.execute('UPDATE phase6_config SET config_json=?,config_hash=?',(json.dumps(cfg),phase4.config_hash(cfg)))
+            before = dict(c.execute('SELECT * FROM phase6_config').fetchone())
+        p6.start(clock=99999)
+        with self.assertRaisesRegex(RuntimeError,'design differs'):
+            self.run_hour()
+        with p6.database() as c:
+            self.assertEqual(before,dict(c.execute('SELECT * FROM phase6_config').fetchone()))
+        self.assertEqual(self.calls,[])
+
     def test_frozen_design_and_hashes_reject_drift(self):
         with p6.database() as c:
             changed = dict(self.cfg, deadline_seconds=900)
@@ -279,12 +392,22 @@ class RuntimeTests(unittest.TestCase):
                 for label in ('Single-shot volatility = ACTIVE', 'Repeat modal class = ACTIVE',
                               'Repeat agreement >= 8/10', '10-shot repeat agreement',
                               'ACTIVE repeat agreement >= 8/10', 'Direction ensemble',
-                              'Majority-vote ensemble', 'Probability-average ensemble',
+                              'Majority-vote Direction Ensemble', 'Probability-average Direction Ensemble',
                               '<th>ACTIVE repeat agreement</th>'):
                     self.assertIn(label,rendered)
                 self.assertNotIn('including ensembles',rendered)
                 self.assertNotIn('Probability ensemble',rendered)
                 self.assertNotIn('missing ensembles excluded',rendered)
+                for category in ('Volatility Gate','Baselines','Direction Methods','Direction Ensembles'):
+                    self.assertIn('<h2>'+category+'</h2>',rendered)
+                positions = [rendered.index('<h2>'+category+'</h2>') for category in ('Volatility Gate','Baselines','Direction Methods','Direction Ensembles')]
+                self.assertEqual(positions,sorted(positions))
+                for label in ('Always UP','Always DOWN','Random 50/50','1h Momentum Baseline',
+                              '1h Reversal Baseline','Short-horizon Momentum','Saved Direction ensemble membership',
+                              'FLAT','No epsilon dead-zone','never counted as incorrect'):
+                    self.assertIn(label,rendered)
+            self.assertIn('expected accuracy = 50%',page)
+            self.assertIn('binary Brier = 0.25',page)
         self.assertEqual(before,self.db.read_bytes())
         data = views.report(self.db)
         self.assertEqual(data['accepted'],1)

@@ -1,13 +1,16 @@
-"""Frozen v1 direction rules operating only on the stored Phase 3 text input."""
+"""Frozen v2 direction rules operating only on the stored Phase 3 text input."""
 import hashlib
 import json
 import math
 import re
 
-VERSION = 'phase6-v1'
-BASE_METHODS = ('gpt', 'momentum_1h', 'momentum_short', 'reversal_1h',
-                'always_up', 'breakout', 'trend', 'order_flow', 'order_book', 'logistic')
-METHODS = BASE_METHODS + ('ensemble_vote', 'ensemble_probability')
+VERSION = 'phase6-v2'
+BASELINES = ('always_up', 'always_down', 'random_50_50', 'momentum_1h', 'reversal_1h')
+DIRECTION_METHODS = ('gpt', 'momentum_short', 'breakout', 'trend', 'order_flow', 'order_book', 'logistic')
+DIRECTION_ENSEMBLES = ('ensemble_vote', 'ensemble_probability')
+BASE_METHODS = BASELINES + DIRECTION_METHODS
+METHODS = BASE_METHODS + DIRECTION_ENSEMBLES
+RANDOM_SEED = 'phase6-random-50-50-v1'
 LOGISTIC_KEYS = ('return_1h', 'return_5m', 'return_15m', 'sma_gap', 'macd_hist',
                  'buy_ratio', 'imbalance', 'micro_offset')
 
@@ -70,9 +73,27 @@ def sign(value):
     return output('UP' if value > 0 else 'DOWN')
 
 
-def rule(method, f):
+def random_baseline(target):
+    """One reproducible seeded Bernoulli(1/2) draw per target, not per run.
+
+    SHA-256's first bit selects UP/DOWN. No global RNG state or execution order
+    enters the draw; a fixed seed plus target is the entire input.
+    """
+    if isinstance(target, bool) or not isinstance(target, int) or target % 3600:
+        raise ValueError('Random 50/50 requires an aligned integer target hour')
+    draw = hashlib.sha256(f'{RANDOM_SEED}:{target}'.encode()).hexdigest()
+    return output('UP' if int(draw[:2],16) < 128 else 'DOWN', audit={
+        'seed': RANDOM_SEED, 'target': target, 'algorithm': 'SHA-256 first bit: 0=UP, 1=DOWN',
+        'draw_sha256': draw})
+
+
+def rule(method, f, target=None):
     if method == 'always_up':
         return output('UP')
+    if method == 'always_down':
+        return output('DOWN')
+    if method == 'random_50_50':
+        return random_baseline(target)
     if method == 'momentum_1h':
         return sign(f['return_1h'])
     if method == 'reversal_1h':
@@ -97,13 +118,21 @@ def rule(method, f):
 
 
 def ensembles(results):
-    eligible = {k: v for k, v in results.items() if k in BASE_METHODS and v['status'] == 'complete'}
+    eligible = {k: v for k, v in results.items() if k in DIRECTION_METHODS and v['status'] == 'complete'}
     votes = [v['direction'] for v in eligible.values()]
     probabilities = [v['p_up'] for v in eligible.values() if v['p_up'] is not None]
     # Rule directions are deliberately not invented 0/1 probabilities.
-    vote = sign(votes.count('UP')-votes.count('DOWN')) if len(votes) >= 3 else output(reason='Need >=3 eligible methods')
-    average = output(p_up=sum(probabilities)/len(probabilities)) if len(probabilities) >= 2 else output(reason='Need >=2 probability methods')
-    vote['audit'] = {'eligible': sorted(eligible)}
+    vote = sign(votes.count('UP')-votes.count('DOWN')) if len(votes) >= 3 else output(reason='Need >=3 eligible Direction Methods')
+    if len(votes) >= 3 and votes.count('UP') == votes.count('DOWN'):
+        vote['reason'] = 'Majority-vote Direction Ensemble tie; abstain'
+    if len(probabilities) >= 2:
+        average = output(p_up=sum(probabilities)/len(probabilities))
+        if average['p_up'] == .5:
+            average.update(status='unavailable',direction=None,
+                           reason='Probability-average Direction Ensemble p_up=0.5; abstain')
+    else:
+        average = output(reason='Need >=2 probability Direction Methods')
+    vote['audit'] = {'eligible': sorted(eligible), 'up_votes': votes.count('UP'), 'down_votes': votes.count('DOWN')}
     average['audit'] = {'eligible': sorted(k for k,v in eligible.items() if v['p_up'] is not None)}
     return {'ensemble_vote': vote, 'ensemble_probability': average}
 
