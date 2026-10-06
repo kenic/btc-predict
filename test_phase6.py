@@ -417,6 +417,97 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(gpt['coverage_accepted'],1)
         self.assertAlmostEqual(gpt['mean_signed_pnl'],10)
 
+    def test_actual_volatility_reuses_phase4_calculation_and_frozen_regime(self):
+        from volatility import realized_volatility, classify
+        self.run_hour()
+        target = 3600
+        candles = {t:[t,90,120,100,100*1.001**i,1]
+                   for i,t in enumerate(range(target-300,target+3600,300))}
+        last = candles[target+3300][4]
+        p6.evaluate(lambda t:[t,90,120,100,last,1],clock=7200)
+        expected = realized_volatility(list(candles.values()),target)
+        before = self.db.read_bytes()
+        with patch.object(views,'load_candles',return_value=candles), patch('direction_volatility.realized_volatility',wraps=realized_volatility) as calculation:
+            report = views.report(self.db)
+            calculation.assert_called_once()
+            row = report['recent'][0]
+            self.assertEqual(row['actual_volatility'],expected)
+            self.assertEqual(row['actual_regime'],classify(expected,self.cfg['gate']['volatility_config']))
+            self.assertEqual(row['actual_volatility_status'],'complete')
+            page = views.page(self.db)
+            self.assertIn(f'{expected:.4f}%',page)
+            self.assertIn(f'{100*(last/100-1):+.4f}%',page)
+        self.assertEqual(before,self.db.read_bytes())
+
+    def test_saved_phase5_actual_rv_reused_with_exact_phase4_thresholds(self):
+        self.run_hour()
+        for value,regime in ((.199999999,'QUIET'),(.2,'NORMAL'),(.4,'ACTIVE')):
+            with p6.database() as c:
+                c.execute("INSERT OR REPLACE INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv,evaluated_at) VALUES(3600,'start','complete','saved',.1,?,'evaluated')",(value,))
+            before = self.db.read_bytes()
+            with patch.object(views,'load_candles',side_effect=AssertionError('No cache or data refetch needed')):
+                row = views.report(self.db)['recent'][0]
+                self.assertEqual(row['actual_volatility'],value)
+                self.assertEqual(row['actual_regime'],regime)
+            self.assertEqual(before,self.db.read_bytes())
+
+    def test_unfinished_target_pending_and_missing_candle_not_interpolated(self):
+        self.run_hour()
+        candles = {t:[t,90,120,100,100*1.001**i,1]
+                   for i,t in enumerate(range(3300,7200,300))}
+        with patch.object(views.time,'time',return_value=7199), patch.object(views,'load_candles',side_effect=AssertionError('Do not calculate an open hour')):
+            row = views.report(self.db)['recent'][0]
+            self.assertIsNone(row['actual_volatility'])
+            self.assertIsNone(row['actual_regime'])
+            self.assertEqual(row['actual_volatility_status'],'pending')
+            self.assertEqual(views.format_value('actual_volatility',None,row),'pending')
+            self.assertEqual(views.format_value('actual_regime',None,row),'pending')
+        del candles[5100]
+        with patch.object(views,'load_candles',return_value=candles), patch('prepare_phase4.fetch_candles',side_effect=AssertionError('No network fetch from dashboard')):
+            row = views.report(self.db)['recent'][0]
+            self.assertIsNone(row['actual_volatility'])
+            self.assertIsNone(row['actual_regime'])
+            self.assertEqual(row['actual_volatility_status'],'unavailable')
+            self.assertEqual(views.format_value('actual_volatility',None,row),'unavailable')
+
+    def test_conflicting_cached_target_close_is_unavailable(self):
+        self.run_hour()
+        p6.evaluate(lambda t:[t,90,120,100,110,1],clock=7200)
+        candles = {t:[t,90,120,100,100,1] for t in range(3300,7200,300)}
+        with patch.object(views,'load_candles',return_value=candles):
+            row = views.report(self.db)['recent'][0]
+            self.assertEqual(row['actual_volatility_status'],'unavailable')
+            self.assertIsNone(row['actual_volatility'])
+            self.assertAlmostEqual(row['actual_return'],10)
+
+    def test_recent_hours_format_column_order_and_raw_precision(self):
+        self.run_hour()
+        p6.evaluate(lambda t:[t,90,120,100,99.82948820898182,1],clock=7200)
+        with p6.database() as c:
+            c.execute("INSERT INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv) VALUES(3600,'start','complete','saved',.1,.4127123456789)")
+        before = self.db.read_bytes()
+        with app.app.test_client() as client:
+            for route in ('/direction-active/','/analyze/?phase=phase6'):
+                page = client.get(route).get_data(as_text=True)
+                recent = page.split('<h2>Recent hours · accepted and rejected</h2>')[1].split('</section>')[0]
+                self.assertIn('-0.1705%',recent)
+                self.assertIn('0.4127%',recent)
+                self.assertNotIn('None',recent)
+                labels = ('Target','Gate','Single-shot volatility','ACTIVE repeat agreement','Reason',
+                          'Actual return','Actual volatility','Actual regime','Actual direction',
+                          'Repeat modal class','Repeat agreement')
+                positions = [recent.index('<th>'+label+'</th>') for label in labels]
+                self.assertEqual(positions,sorted(positions))
+            raw = client.get('/direction-active/data.json').get_json()['recent'][0]
+            self.assertEqual(raw['actual_volatility'],.4127123456789)
+            self.assertNotEqual(raw['actual_return'],round(raw['actual_return'],4))
+        self.assertEqual(before,self.db.read_bytes())
+        self.assertEqual(views.format_value('actual_return',.1286123),'+0.1286%')
+        self.assertEqual(views.format_value('actual_return',None),'pending')
+        self.assertEqual(views.format_value('p_up',.612345),'0.612')
+        self.assertEqual(views.format_value('accuracy',.612345),'61.2%')
+        self.assertEqual(views.format_value('brier',.123456),'0.1235')
+
     def test_cache_reuses_only_identical_frozen_source(self):
         with p6.database() as c:
             cfg_json = json.dumps(self.cfg['gate']['volatility_config'])

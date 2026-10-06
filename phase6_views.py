@@ -4,9 +4,11 @@ import json
 import math
 import sqlite3
 import statistics
+import time
 from pathlib import Path
 from phase6_methods import BASELINES, DIRECTION_METHODS, DIRECTION_ENSEMBLES, METHODS
-from volatility import CLASSES
+from volatility import CLASSES, classify
+from direction_volatility import load_candles, assign_rv
 from ui import card, metric_blocks, page_shell, records_table, styled_table
 
 
@@ -39,6 +41,58 @@ def gate_summary(event):
                 repeat_agreement=repeated.count(modal)/10 if valid else None)
 
 
+def actual_volatility(events, connection, tables, config, clock):
+    """Read-only visibility using saved Phase 4/5 outcomes or exact cached 5m data.
+
+    No network fetching, DB writes, interpolation or new RV definition. Cached
+    candles use the existing Phase 4 calculation via assign_rv. Conflicting saved
+    outcomes or a cache inconsistent with the saved target close stay unavailable.
+    """
+    saved = {}
+    for table, target in (('phase5_predictions','target_candle_time'),
+                          ('volatility_predictions','target_candle_time')):
+        if table not in tables:
+            continue
+        for row in connection.execute(f'SELECT {target},actual_rv FROM {table} WHERE actual_rv IS NOT NULL'):
+            saved.setdefault(row[0],[]).append(row[1])
+    outcomes, missing = {}, []
+    for event in events:
+        t = event['target']
+        outcomes[t] = dict(actual_volatility=None, actual_regime=None,
+                           actual_volatility_status='pending' if clock<t+3600 else 'unavailable')
+        if clock<t+3600:
+            continue
+        values = saved.get(t,[])
+        if values:
+            if any(not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in values) or len(set(values))!=1:
+                continue
+            rv = values[0]
+            outcomes[t].update(actual_volatility=rv, actual_regime=classify(rv,config),
+                               actual_volatility_status='complete')
+        else:
+            missing.append(event)
+    if missing:
+        try:
+            candles = load_candles()
+            consistent = []
+            for event in missing:
+                raw = event.get('target_raw_json')
+                if raw:
+                    target = json.loads(raw)
+                    last = candles.get(event['target']+3300)
+                    if last is None or int(target[0])!=event['target'] or float(last[4])!=float(target[4]):
+                        continue
+                consistent.append(dict(event,target_candle_time=event['target']))
+            assigned, _ = assign_rv(consistent,candles,config)
+            for event in assigned:
+                outcomes[event['target']].update(actual_volatility=event['rv'],actual_regime=event['regime'],
+                                                actual_volatility_status='complete')
+        except (ValueError, TypeError, KeyError, IndexError, OSError):
+            # Missing/conflicting/invalid archives must not break a dashboard.
+            pass
+    return outcomes
+
+
 def report(path):
     result = dict(status='Not started', config=None, config_hash=None, code_sha=None,
                   accepted=0, rejected=0, pending=0, all_hours=0, recorded_hours=0,
@@ -57,13 +111,16 @@ def report(path):
             events = [dict(r) for r in c.execute('SELECT * FROM phase6_events ORDER BY target')]
             predictions = [dict(r) for r in c.execute('''SELECT p.*,e.actual_return,e.actual_direction FROM phase6_predictions p
                 JOIN phase6_events e USING(target) WHERE e.gate='accepted' ORDER BY p.target,p.method''')]
+            cfg = json.loads(state['config_json'])
+            visible = {e['target']:e for e in events[-24:]}
+            visible.update({e['target']:e for e in [r for r in events if r['gate']=='accepted'][-12:]})
+            actuals = actual_volatility(list(visible.values()),c,tables,cfg['gate']['volatility_config'],time.time())
     except sqlite3.OperationalError:
         result['status'] = 'Phase 6 database unavailable'
         return result
     cfg = json.loads(state['config_json'])
     accepted = [e for e in events if e['gate']=='accepted']
     # Scheduled hours through the last recorded event include absent scheduler cycles.
-    import time
     end = max(e['target'] for e in accepted) if len(accepted)>=cfg['stop']['accepted_gates'] else int(time.time())//3600*3600
     all_hours = max(0,(end-state['start_target'])//3600+1)
     all_hours = max(all_hours,len(events))
@@ -74,9 +131,10 @@ def report(path):
         pending=sum(e['gate']=='pending' for e in events), all_hours=all_hours, recorded_hours=len(events),
         missing_hours=max(0,all_hours-len(events)), single_active=single_active,
         scored_events=sum(e['actual_direction'] in ('UP','DOWN') for e in accepted),
-        recent_accepted=[{**{k:e[k] for k in ('target','single_class','active_votes','actual_return','actual_direction')}, **gate_summary(e)} for e in accepted[-12:][::-1]],
+        recent_accepted=[{**{k:e[k] for k in ('target','single_class','active_votes','actual_return','actual_direction')}, **actuals[e['target']], **gate_summary(e)} for e in accepted[-12:][::-1]],
         recent_predictions=[{k:p[k] for k in ('target','method','status','direction','p_up','p_down','version','model_version','correct','brier','signed_pnl','reason')} for p in predictions if p['target'] in {e['target'] for e in accepted[-12:]}],
-        recent=[{**{k:e[k] for k in ('target','gate','single_class','active_votes','reason','actual_return','actual_direction')}, **gate_summary(e)} for e in events[-24:][::-1]],
+        recent=[{**{k:e[k] for k in ('target','gate','single_class','active_votes','reason','actual_return')},
+            **actuals[e['target']], 'actual_direction':e['actual_direction'], **gate_summary(e)} for e in events[-24:][::-1]],
         ensemble_membership=[dict(target=p['target'],method=p['method'],status=p['status'],
             eligible=(json.loads(p['audit_json']) or {}).get('eligible', []))
             for p in predictions if p['method'] in DIRECTION_ENSEMBLES],
@@ -129,18 +187,44 @@ def display_text(value):
         'Repeat modal class = ACTIVE and ACTIVE repeat agreement >= 8/10 required')
 
 
+def format_value(key, value, row=None):
+    """Formatting only; report JSON and persisted numeric precision stay intact."""
+    row = row or {}
+    if key in ('actual_volatility','actual_regime') and value is None:
+        return row.get('actual_volatility_status','pending')
+    if key in ('actual_return','actual_direction') and value is None:
+        return 'pending'
+    if value is None:
+        return '—'
+    if key in ('actual_return','signed_pnl','mean_signed_pnl','pnl_difference'):
+        return f'{value:+.4f}%'
+    if key in ('actual_volatility','mean_absolute_return','median_absolute_return'):
+        return f'{value:.4f}%'
+    if key in ('accuracy','coverage_all','coverage_active','coverage_accepted','accuracy_difference'):
+        return f'{value:.1%}'
+    if key in ('p_up','p_down'):
+        return f'{value:.3f}'
+    if key in ('brier','brier_difference'):
+        return f'{value:.4f}'
+    if key == 'exact_mcnemar_p':
+        return f'{value:.4g}'
+    if isinstance(value,float):
+        return f'{value:.4f}'
+    return display_text(value)
+
+
 def display_records(rows):
     labels = {'single_class': 'Single-shot volatility', 'active_votes': 'ACTIVE repeat agreement',
               'repeat_modal_class': 'Repeat modal class', 'repeat_agreement': 'Repeat agreement',
               'eligible': 'Eligible Direction Methods'}
     if not rows:
         return records_table([])
-    keys = list(dict.fromkeys(k for row in rows for k in row))
+    keys = list(dict.fromkeys(k for row in rows for k in row if k != 'actual_volatility_status'))
     return styled_table(
         [labels.get(k,k.replace('_',' ').capitalize()) for k in keys],
         [[('—' if row.get(k) is None else str(row[k])+'/10') if k == 'active_votes'
           else ('—' if row.get(k) is None else f'{round(row[k]*10)}/10') if k == 'repeat_agreement'
-          else display_text(row.get(k,'—')) for k in keys] for row in rows])
+          else format_value(k,row.get(k),row) for k in keys] for row in rows])
 
 
 def page(path, analysis=False):
@@ -167,8 +251,6 @@ def page(path, analysis=False):
         gate_content += '<h3>Latest saved gate</h3>'+display_records([{k:current[k] for k in (
             'target','gate','single_class','repeat_modal_class','repeat_agreement','active_votes','reason')}])
     content = introduction+card('Volatility Gate',gate_content)
-    def fmt(v):
-        return '—' if v is None else f'{v:.5f}' if isinstance(v,float) else str(v)
     fields = ('method','n','correct','accuracy','brier_n','brier','pnl_n','mean_signed_pnl',
               'mean_absolute_return','median_absolute_return','coverage_all','coverage_active','coverage_accepted')
     headers = ('Direction predictor', 'N', 'Correct', 'Accuracy', 'Brier N', 'Brier', 'PnL N',
@@ -189,7 +271,7 @@ def page(path, analysis=False):
             'Rules have no invented probabilities. Each participating Direction Method has equal weight. '
             'Baselines never participate.</p>'}
     for title, members in CATEGORIES:
-        rows = [[fmt(display_text(m[k])) for k in fields] for m in data['methods'] if m['method'] in members]
+        rows = [[format_value(k,m[k]) for k in fields] for m in data['methods'] if m['method'] in members]
         # Keep all pre-start method labels visible before a start marker exists.
         if not rows:
             rows = [[METHOD_LABELS[m]]+['—']*(len(fields)-1) for m in members]
@@ -201,7 +283,7 @@ def page(path, analysis=False):
         '<p>Same next-hour direction target as Phases 1–3. UP: target completed 1h close &gt; reference completed 1h close. '
         'DOWN: target completed 1h close &lt; reference completed 1h close. '
         'FLAT: target completed 1h close = reference completed 1h close. No epsilon dead-zone.</p>'
-        '<p>Accuracy/coverage are fractions. FLAT is excluded from Accuracy / Brier and contributes zero simple PnL. '
+        '<p>Accuracy and coverage are shown as percentages. FLAT is excluded from Accuracy / Brier and contributes zero simple PnL. '
         'Predictor abstain is excluded from scored N, never counted as incorrect, and reduces coverage. '
         'Brier is scored only for available probability forecasts. '
         'PnL = ± target percent return for unit long/short, no fees/spread. '
@@ -219,7 +301,10 @@ def page(path, analysis=False):
             'Brier differences use the probability intersection only.</p>'+display_records(data['paired']))
     content += card('Recent accepted ACTIVE events',display_records(data['recent_accepted']))
     content += card('Recent accepted-event predictor outputs',display_records(data['recent_predictions']))
-    content += card('Recent hours · accepted and rejected',display_records(data['recent']))
+    content += card('Recent hours · accepted and rejected',
+        '<p>Actual volatility uses the Phase 4 RV definition and the frozen Phase 4 thresholds for Actual regime. '
+        'Saved Phase 4/5 target evaluations or complete saved 5m windows only; no fetching or interpolation. '
+        'Open hours are pending; missing/conflicting completed-hour data is unavailable.</p>'+display_records(data['recent']))
     content += card('Missing / abstaining outputs · never backfilled',display_records(data['missing'][-60:]))
     if data['config']:
         content += card('Frozen preregistration', '<p>Started: '+escape(data['started_at'])+' · Code: '+escape(data['code_sha'])+

@@ -208,6 +208,47 @@ a new live target. Pending interrupted gates become rejected; interrupted method
 reservations become unavailable. Provider calls cannot be guaranteed exactly
 once across a remote/local crash, but persisted attempts are never reissued.
 
+## Recent-hours evaluation visibility
+
+Recent hours show Target, Gate, Single-shot volatility, ACTIVE repeat agreement,
+Reason, Actual return, **Actual volatility**, **Actual regime**, Actual direction,
+Repeat modal class and Repeat agreement. Returns use signed four-decimal percent
+(e.g. `-0.1705%`); realized RV uses four-decimal percent (e.g. `0.4127%`). Probability
+outputs use three decimals, accuracy/coverage one-decimal percent and Brier four
+decimals. Agreement remains `9/10`. Raw JSON and all stored values retain full precision.
+
+Actual volatility reuses saved Phase 4/Phase 5 target-hour `actual_rv` outcomes.
+Where absent, it can use the existing saved 5m archives through the shared Phase
+4 `realized_volatility` helper (via the existing `assign_rv` path), requiring the
+exact thirteen closes including the preceding 5m close. Actual regime is computed
+by the existing Phase 4 `classify` helper with the Phase 4 frozen thresholds
+already embedded in the Phase 6 start config. No new thresholds or RV definition
+are introduced. Cached target-end close must agree with the saved target candle
+when that candle exists; conflicting saved RV outcomes are also unavailable.
+
+Open target hours display **pending**. Missing/incomplete/conflicting saved data
+for completed hours display **unavailable** for both RV and regime. Direction
+return evaluation can be complete while RV is unavailable. The page never fetches
+market data, interpolates candles or writes/backfills predictions. After Phase 5
+stops, hours without an existing RV evaluation or complete cached window remain
+unavailable; a 1h OHLC candle alone cannot reconstruct Phase 4's 5m-based RV.
+
+This visibility update changes no runtime source, frozen implementation hash,
+start record, database schema, experiment design or evaluation score. On an
+existing Phase 6 deployment, update with:
+
+```sh
+cd /opt/btc-predict
+git pull --ff-only origin phase6
+.venv/bin/python -m unittest test_phase6 test_ui -q
+sudo systemctl restart btc-web.service
+systemctl is-active btc-web.service
+```
+
+Only the web service needs restart. No migration, timer/worker restart or new
+`--start` invocation is required. The pre-start v2 revision and initial deployment
+instructions below describe their separate changes, not this visibility update.
+
 ## Requested pre-start revision and deployment scope
 
 “Repeat agreement” / “10-shot repeat agreement” are repeated classifications by
