@@ -52,6 +52,32 @@ def load_candles(directory=None):
     return {t:c for t,c in candles.items() if t not in invalid}
 
 
+# Reporting only: do not extend frozen live METHODS or ensemble member sets.
+REPORT_METHODS = METHODS + ('reverse_gpt',)
+
+
+def reverse_gpt(prediction):
+    """Derive an in-memory row; mirror evaluate's scoring without runtime edits.
+
+    No shared runtime scoring helper exists. Keeping these three formulas here
+    preserves the frozen implementation hashes. Never persist the derived row.
+    """
+    row = dict(prediction, method='reverse_gpt', version='derived-analysis-v1',
+               model_version=None, direction=None, p_up=None, p_down=None,
+               correct=None, brier=None, signed_pnl=None, status='unavailable',
+               reason='Derived from GPT; analysis-only anti-signal; no additional model call')
+    if prediction['status'] != 'complete' or prediction['direction'] not in ('UP', 'DOWN'):
+        return row
+    row.update(status='complete', direction='DOWN' if prediction['direction']=='UP' else 'UP',
+               p_up=prediction['p_down'], p_down=prediction['p_up'])
+    actual, ret = prediction['actual_direction'], prediction['actual_return']
+    if actual in ('UP', 'DOWN', 'FLAT') and ret is not None:
+        row['correct'] = None if actual=='FLAT' else int(row['direction']==actual)
+        row['brier'] = None if actual=='FLAT' or row['p_up'] is None else (row['p_up']-int(actual=='UP'))**2
+        row['signed_pnl'] = ret*(1 if row['direction']=='UP' else -1)
+    return row
+
+
 def mean(values):
     return statistics.mean(values) if values else None
 
@@ -171,6 +197,7 @@ def report(path):
     except sqlite3.OperationalError:
         result['status'] = 'Phase 6 database unavailable'
         return result
+    predictions += [reverse_gpt(p) for p in predictions if p['method']=='gpt']
     cfg = json.loads(state['config_json'])
     for event in events:
         status = actuals.get(event['target'], {}).get('actual_volatility_status')
@@ -199,7 +226,7 @@ def report(path):
             for p in predictions if p['method'] in DIRECTION_ENSEMBLES],
         missing=[{k:p[k] for k in ('target','method','status','reason')} for p in predictions if p['status']!='complete'])
     indexes = {}
-    for method in METHODS:
+    for method in REPORT_METHODS:
         available = [p for p in predictions if p['method']==method and p['status']=='complete']
         scored = [p for p in available if p['correct'] is not None]
         pnl = [p['signed_pnl'] for p in available if p['signed_pnl'] is not None]
@@ -214,7 +241,7 @@ def report(path):
             coverage_active=len(available)/single_active if single_active else None,
             coverage_accepted=len(available)/len(accepted) if accepted else None))
         indexes[method] = {p['target']:p for p in scored}
-    for a,b in itertools.combinations(METHODS,2):
+    for a,b in itertools.combinations(REPORT_METHODS,2):
         comparison = paired(indexes[a],indexes[b])
         if comparison['common_n']:
             result['paired'].append(dict(left=a,right=b,**comparison))
@@ -225,13 +252,13 @@ def report(path):
 METHOD_LABELS = {
     'always_up': 'Always UP', 'always_down': 'Always DOWN', 'random_50_50': 'Random 50/50',
     'momentum_1h': '1h Momentum Baseline', 'reversal_1h': '1h Reversal Baseline',
-    'gpt': 'GPT / OpenAI', 'momentum_short': 'Short-horizon Momentum',
+    'reverse_gpt': 'Reverse GPT', 'gpt': 'GPT / OpenAI', 'momentum_short': 'Short-horizon Momentum',
     'breakout': 'Breakout', 'trend': 'Trend', 'order_flow': 'Order Flow',
     'order_book': 'Order Book', 'logistic': 'Logistic Regression',
     'ensemble_vote': 'Majority-vote Direction Ensemble',
     'ensemble_probability': 'Probability-average Direction Ensemble',
 }
-CATEGORIES = (('Baselines', BASELINES), ('Direction Methods', DIRECTION_METHODS),
+CATEGORIES = (('Baselines', BASELINES), ('Direction Methods', ('gpt', 'reverse_gpt') + DIRECTION_METHODS[1:]),
               ('Direction Ensembles', DIRECTION_ENSEMBLES))
 
 
@@ -322,6 +349,10 @@ def page(path, analysis=False):
             '1h return sign; 1h Reversal Baseline takes its opposite. Exactly zero return: abstain.</p>',
         'Direction Methods': '<p>GPT / OpenAI, Short-horizon Momentum, Breakout, Trend, Order Flow, '
             'Order Book and Logistic Regression are the only permitted Direction ensemble members. '
+            'Reverse GPT is derived from GPT: deterministic inversion of stored GPT direction/probabilities; '
+            'no additional model call. Derived / analysis-only anti-signal for post-hoc monitoring, '
+            'outside the frozen live predictor set and excluded from both ensembles. '
+            'Small N does not establish a new strategy. '
             'Short-horizon Momentum uses the mean of 5m and 15m returns and is separate from 1h Momentum Baseline.</p>',
         'Direction Ensembles': '<p>Majority-vote Direction Ensemble needs at least three eligible Direction Methods: '
             'more UP votes predicts UP, more DOWN votes predicts DOWN; tie: abstain. '
@@ -330,7 +361,7 @@ def page(path, analysis=False):
             'Rules have no invented probabilities. Each participating Direction Method has equal weight. '
             'Baselines never participate.</p>'}
     for title, members in CATEGORIES:
-        rows = [[format_value(k,m[k]) for k in fields] for m in data['methods'] if m['method'] in members]
+        rows = [[format_value(k,m[k]) for k in fields] for member in members for m in data['methods'] if m['method']==member]
         # Keep all pre-start method labels visible before a start marker exists.
         if not rows:
             rows = [[METHOD_LABELS[m]]+['—']*(len(fields)-1) for m in members]
@@ -349,6 +380,10 @@ def page(path, analysis=False):
         'Coverage uses available predictions, all scheduled hours (missing cycles included), observed single-shot ACTIVE '
         'hours and accepted gates. Missing-hour ACTIVE status is unknown.</p>')
     if analysis:
+        content += card('GPT vs Reverse GPT · derived analysis only',
+            '<p>Post-hoc anti-signal monitoring on stored GPT outputs; no additional model call.</p>'+
+            display_records([{k:m[k] for k in ('method','n','accuracy','pnl_n','mean_signed_pnl')}
+                             for m in data['methods'] if m['method'] in ('gpt','reverse_gpt')]))
         content += card('Random reference values · analysis only',
             '<p>Theoretical Random 50/50 expected accuracy = 50%. '
             'Constant p_up = 0.5 forecast binary Brier = 0.25 for every UP/DOWN target. '

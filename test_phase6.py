@@ -497,6 +497,70 @@ class RuntimeTests(unittest.TestCase):
             for key in ('actual_return','actual_volatility','actual_regime','actual_direction'):
                 self.assertEqual(views.format_value(key,row[key],row),'unavailable')
 
+
+    def test_reverse_gpt_historical_readonly_analysis(self):
+        hashes = p6.implementation_hashes()
+        for target, probability, close in ((3600,.7,110),(7200,.2,90),(10800,.7,90),(14400,.2,110),(18000,.5,100)):
+            self.run_hour(target,gpt_call=lambda context,model,p=probability:
+                          dict(methods.output(p_up=p),raw_json='raw',model_version=model))
+            p6.evaluate(lambda t,c=close:[t,100,120,80,c,1],clock=target+3600)
+        self.run_hour(21600,gpt_call=lambda *a:(_ for _ in ()).throw(ValueError('unavailable')))
+        self.run_hour(25200)  # Pending evaluation remains unscored.
+        with p6.database() as c:
+            stored = [dict(r) for r in c.execute("SELECT p.*,e.actual_return,e.actual_direction FROM phase6_predictions p JOIN phase6_events e USING(target) WHERE method='gpt'")]
+            count = c.execute('SELECT count(*) FROM phase6_predictions').fetchone()[0]
+        before = self.db.read_bytes()
+        for original in stored:
+            reverse = views.reverse_gpt(original)
+            if original['status'] != 'complete':
+                self.assertEqual(reverse['status'],'unavailable')
+                self.assertIsNone(reverse['signed_pnl'])
+                continue
+            self.assertEqual(reverse['direction'],{'UP':'DOWN','DOWN':'UP'}[original['direction']])
+            self.assertEqual((reverse['p_up'],reverse['p_down']),(original['p_down'],original['p_up']))
+            if original['signed_pnl'] is not None:
+                self.assertEqual(reverse['signed_pnl'],-original['signed_pnl'])
+            else:
+                self.assertIsNone(reverse['signed_pnl'])
+            if original['actual_direction'] in ('UP','DOWN'):
+                self.assertEqual(reverse['correct'],1-original['correct'])
+                self.assertEqual(reverse['brier'],(original['p_down']-int(original['actual_direction']=='UP'))**2)
+            else:
+                self.assertIsNone(reverse['correct'])
+                self.assertIsNone(reverse['brier'])
+        for direction in (None,'FLAT','invalid'):
+            invalid = dict(stored[0],direction=direction)
+            self.assertEqual(views.reverse_gpt(invalid)['status'],'unavailable')
+        with patch.object(p6,'direction_call',side_effect=AssertionError('New model call')), patch.object(p6,'run',side_effect=AssertionError('Live prediction')):
+            data = views.report(self.db)
+            with app.app.test_client() as client:
+                for route in ('/direction-active/','/analyze/?phase=phase6'):
+                    response = client.get(route)
+                    self.assertEqual(response.status_code,200)
+                    html = response.get_data(as_text=True)
+                    self.assertIn('Reverse GPT',html)
+                    self.assertIn('analysis-only anti-signal',html)
+                    self.assertIn('no additional model call',html)
+        metrics = {r['method']:r for r in data['methods']}
+        for key in ('n','available','pnl_n','brier_n','coverage_all','coverage_active','coverage_accepted','mean_absolute_return','median_absolute_return'):
+            self.assertEqual(metrics['gpt'][key],metrics['reverse_gpt'][key])
+        self.assertEqual(metrics['reverse_gpt']['mean_signed_pnl'],-metrics['gpt']['mean_signed_pnl'])
+        self.assertEqual(metrics['reverse_gpt']['correct'],metrics['gpt']['n']-metrics['gpt']['correct'])
+        self.assertTrue(any(r['left']=='gpt' and r['right']=='reverse_gpt' for r in data['paired']))
+        for membership in data['ensemble_membership']:
+            self.assertNotIn('reverse_gpt',membership['eligible'])
+        self.assertNotIn('reverse_gpt',methods.METHODS)
+        self.assertNotIn('reverse_gpt',methods.DIRECTION_METHODS)
+        outputs = {m:methods.output(p_up=.7) for m in methods.DIRECTION_METHODS}
+        expected = methods.ensembles(outputs)
+        outputs['reverse_gpt'] = methods.output(p_up=.3)
+        self.assertEqual(methods.ensembles(outputs),expected)
+        self.assertEqual(hashes,p6.implementation_hashes())
+        self.assertEqual(before,self.db.read_bytes())
+        with p6.database() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM phase6_predictions').fetchone()[0],count)
+            self.assertEqual(c.execute("SELECT count(*) FROM phase6_predictions WHERE method='reverse_gpt'").fetchone()[0],0)
+
     def test_actual_volatility_reuses_phase4_calculation_and_frozen_regime(self):
         from volatility import realized_volatility, classify
         self.run_hour()

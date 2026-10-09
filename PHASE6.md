@@ -369,3 +369,40 @@ Do not restore an older DB over current live observations or rerun Phase 4.
 Restore code compatible with the saved start config/hashes before resuming;
 the original v1 tag cannot resume a v2 experiment. Missing past predictions remain
 missing.
+
+## Reverse GPT — post-hoc derived analysis only
+
+**Reverse GPT** is a deterministic derived analysis method shown in Direction
+Methods and `/analyze/?phase=phase6`. It is not part of the frozen live predictor
+set and is not an ensemble member. Added only for post-hoc monitoring / analysis
+of possible GPT anti-signal behavior, it does not preregister a new strategy;
+small N and exploratory results do not establish an edge.
+
+At read time, stored GPT UP/DOWN directions are inverted and stored p_up/p_down
+are swapped. No extra model call or new probability is generated. Unavailable,
+abstaining or invalid GPT directions remain unavailable. Accuracy and binary
+Brier follow existing evaluation semantics; FLAT is excluded from both and has
+zero PnL. Signed PnL is recomputed from saved target return and inverted direction,
+equal to minus GPT signed PnL. N and coverage match GPT.
+
+Historical Phase 6 GPT rows are displayed without backfill: derived rows exist
+only in reports, never in `phase6_predictions`. No schema migration, state/start
+change, gate or stopping-rule amendment, Phase 5 change, provider change or
+frozen runtime hash change is involved. Both Direction ensembles retain their
+existing seven permitted members.
+
+For an existing Phase 6 deployment, fast-forward pull and web restart suffice:
+
+```sh
+cd /opt/btc-predict
+git pull --ff-only origin phase6
+.venv/bin/python -m unittest test_phase6 test_ui -q
+sudo systemctl restart btc-web.service
+systemctl is-active btc-web.service
+curl --fail https://btc.kenic.jp/direction-active/
+curl --fail 'https://btc.kenic.jp/analyze/?phase=phase6'
+```
+
+Preserve local tracked changes and verify the service working directory first.
+No migration, worker/timer restart or `--start` command is required. This task
+does not deploy or modify the live server.
