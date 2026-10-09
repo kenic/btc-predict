@@ -45,3 +45,11 @@ Next-hour realized volatility classification is implemented; see [PHASE4.md](PHA
 Additive replay, continuous RV regression, audit markers and separate dashboard routes.
 See [NEXT_STAGES.md](NEXT_STAGES.md) for the frozen design, restart safety,
 API uncertainty handling and user-operated deployment/restart instructions.
+
+## Generic 5m candle archive
+
+Independent, future-only completed BTC/USD collection into `candles.db`, with
+six-candle short-gap recovery and no interpolation/historical automatic backfill.
+Phase 6 actual RV uses the archive through the unchanged Phase 4 canonical helper.
+See [CANDLE_COLLECTOR.md](CANDLE_COLLECTOR.md) for schema, timing, tests and the
+operator-installed systemd service/timer. Older missing hours remain unavailable.

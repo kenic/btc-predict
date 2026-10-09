@@ -9,13 +9,15 @@ from pathlib import Path
 from phase6_methods import BASELINES, DIRECTION_METHODS, DIRECTION_ENSEMBLES, METHODS
 from volatility import CLASSES, classify
 from direction_volatility import ROOT, assign_rv
+from candle_store import read_window
 from ui import card, metric_blocks, page_shell, records_table, styled_table
 
 
 def load_candles(directory=None):
     """Read existing exact archives beside code and DB, isolating bad timestamps.
 
-    Collectors currently persist trades/book samples, not candle windows. Neither
+    Legacy collectors persist trades/book samples; the new candle DB is read
+    separately before this compatibility fallback. Neither
     rounded prediction context nor individual trades are candle replacements.
     A conflict in another hour must not invalidate this hour's complete window.
     """
@@ -80,18 +82,18 @@ def gate_summary(event):
 
 
 def actual_volatility(events, connection, tables, config, clock, directory=None):
-    """Read-only visibility using saved Phase 4/5 outcomes or exact cached 5m data.
+    """Read-only visibility using evaluated Phase 4/5 RV or exact local 5m data.
 
     No network fetching, DB writes, interpolation or new RV definition. Cached
     candles use the existing Phase 4 calculation via assign_rv. Conflicting saved
-    outcomes or a cache inconsistent with the saved target close stay unavailable.
+    outcomes stay unavailable; legacy JSON also checks the saved 1h target close.
     """
     saved = {}
     for table, target in (('phase5_predictions','target_candle_time'),
                           ('volatility_predictions','target_candle_time')):
         if table not in tables:
             continue
-        for row in connection.execute(f'SELECT {target},actual_rv FROM {table} WHERE actual_rv IS NOT NULL'):
+        for row in connection.execute(f'SELECT {target},actual_rv FROM {table} WHERE actual_rv IS NOT NULL AND evaluated_at IS NOT NULL'):
             saved.setdefault(row[0],[]).append(row[1])
     outcomes, missing = {}, []
     for event in events:
@@ -109,6 +111,16 @@ def actual_volatility(events, connection, tables, config, clock, directory=None)
                                actual_volatility_status='complete')
         else:
             missing.append(event)
+    # Dedicated archive is independent of experiment DB state; bounded read-only
+    # windows only. A failed collector/store cannot prevent dashboard rendering.
+    archive_path = Path(directory or ROOT) / 'candles.db'
+    for event in missing:
+        candles = read_window(archive_path, event['target'])
+        assigned, _ = assign_rv([dict(event,target_candle_time=event['target'])], candles, config)
+        if assigned:
+            outcomes[event['target']].update(actual_volatility=assigned[0]['rv'],
+                actual_regime=assigned[0]['regime'],actual_volatility_status='complete')
+    missing = [event for event in missing if outcomes[event['target']]['actual_volatility_status'] != 'complete']
     if missing:
         try:
             candles = load_candles(directory)
@@ -350,7 +362,9 @@ def page(path, analysis=False):
     content += card('Recent accepted-event predictor outputs',display_records(data['recent_predictions']))
     content += card('Recent hours · accepted and rejected',
         '<p>Actual volatility uses the Phase 4 RV definition and the frozen Phase 4 thresholds for Actual regime. '
-        'Saved Phase 4/5 target evaluations or complete saved 5m windows only; no fetching or interpolation. '
+        'Saved Phase 4/5 evaluated RV first, then complete candles.db 5m windows (with existing JSON archives as fallback). '
+        'The independent collector saves future data only; older rows before collection may remain unavailable. '
+        'No historical automatic backfill, fetching from this page, or interpolation. '
         'Open hours are pending; missing/conflicting completed-hour data is unavailable.</p>'+display_records(data['recent']))
     content += card('Missing / abstaining outputs · never backfilled',display_records(data['missing'][-60:]))
     if data['config']:

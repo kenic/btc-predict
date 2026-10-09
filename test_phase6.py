@@ -450,6 +450,42 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(before,self.db.read_bytes())
         self.assertEqual(hashes,p6.implementation_hashes())
 
+    def test_dedicated_candle_db_all_gates_and_routes_are_read_only(self):
+        import candle_store
+        import collect_candles
+        from volatility import realized_volatility, classify
+        for target, p in ((3600,[.9,.05,.05]),(7200,[.05,.9,.05]),
+                          (10800,[.05,.05,.9]),(14400,[.05,.05,.9])):
+            votes = iter([p]+([[.9,.05,.05]]*10 if target==10800 else [p]*10))
+            self.run_hour(target,class_call=lambda s:(next(votes),'test-model','raw'))
+        candles = [[t,90,120,100,100*1.0001**i,1]
+                   for i,t in enumerate(range(3300,18000,300))]
+        archive = self.db.parent/'candles.db'
+        candle_store.initialize(archive,3300)
+        candle_store.save(archive,candles,18060)
+        p6.evaluate(lambda t:[t,90,120,100,next(x[4] for x in candles if x[0]==t+3300),1],clock=18000)
+        before = self.db.read_bytes()
+        calls = len(self.calls)
+        hashes = p6.implementation_hashes()
+        with patch.object(views.time,'time',return_value=18000), \
+             patch('requests.get',side_effect=AssertionError('No external web fetch')), \
+             patch('urllib.request.urlopen',side_effect=AssertionError('No external web fetch')), \
+             patch.object(p6,'run',side_effect=AssertionError('No predictor rerun')):
+            with app.app.test_client() as client:
+                for url in ('/direction-active/','/analyze/?phase=phase6','/direction-active/data.json'):
+                    self.assertEqual(client.get(url).status_code,200)
+                data = client.get('/direction-active/data.json').get_json()
+                self.assertEqual([r['gate'] for r in data['recent']],['accepted','rejected','rejected','rejected'])
+                for row in data['recent']:
+                    rv = realized_volatility(candles,row['target'])
+                    self.assertEqual(row['actual_volatility'],rv)
+                    self.assertEqual(row['actual_regime'],classify(rv,self.cfg['gate']['volatility_config']))
+        with self.assertRaises(RuntimeError):
+            collect_candles.collect(archive,lambda a,b:(_ for _ in ()).throw(RuntimeError('provider down')),18060)
+        self.assertEqual(self.db.read_bytes(),before)
+        self.assertEqual(len(self.calls),calls)
+        self.assertEqual(p6.implementation_hashes(),hashes)
+
     def test_return_direction_completion_status(self):
         self.run_hour()
         with patch.object(views.time,'time',return_value=7199):
@@ -528,7 +564,7 @@ class RuntimeTests(unittest.TestCase):
         self.run_hour()
         p6.evaluate(lambda t:[t,90,120,100,99.82948820898182,1],clock=7200)
         with p6.database() as c:
-            c.execute("INSERT INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv) VALUES(3600,'start','complete','saved',.1,.4127123456789)")
+            c.execute("INSERT INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv,evaluated_at) VALUES(3600,'start','complete','saved',.1,.4127123456789,'evaluated')")
         before = self.db.read_bytes()
         with app.app.test_client() as client:
             for route in ('/direction-active/','/analyze/?phase=phase6'):

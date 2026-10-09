@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect completed BTC USD 5m candles at boundary plus one minute
+
+[Timer]
+OnCalendar=*-*-* *:01/5:00 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=btc-candles.service
+
+[Install]
+WantedBy=timers.target
