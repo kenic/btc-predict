@@ -8,8 +8,46 @@ import time
 from pathlib import Path
 from phase6_methods import BASELINES, DIRECTION_METHODS, DIRECTION_ENSEMBLES, METHODS
 from volatility import CLASSES, classify
-from direction_volatility import load_candles, assign_rv
+from direction_volatility import ROOT, assign_rv
 from ui import card, metric_blocks, page_shell, records_table, styled_table
+
+
+def load_candles(directory=None):
+    """Read existing exact archives beside code and DB, isolating bad timestamps.
+
+    Collectors currently persist trades/book samples, not candle windows. Neither
+    rounded prediction context nor individual trades are candle replacements.
+    A conflict in another hour must not invalidate this hour's complete window.
+    """
+    candles, invalid = {}, set()
+    paths = dict.fromkeys(root / name for root in (ROOT, Path(directory or ROOT))
+                         for name in ('phase4_history_5m.json', 'direction_history_5m.json'))
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            archive = json.loads(path.read_text())
+            if not isinstance(archive, list):
+                continue
+        except (OSError, ValueError):
+            continue
+        for candle in archive:
+            try:
+                t = int(candle[0])
+                close = float(candle[4])
+                if t != candle[0] or not math.isfinite(close) or close <= 0:
+                    invalid.add(t)
+                    continue
+                if t in candles and float(candles[t][4]) != close:
+                    invalid.add(t)
+                candles[t] = candle
+            except (ValueError, TypeError, IndexError, KeyError, OverflowError):
+                # A malformed entry cannot supply an exact close.
+                try:
+                    invalid.add(int(candle[0]))
+                except (ValueError, TypeError, IndexError, KeyError, OverflowError):
+                    pass
+    return {t:c for t,c in candles.items() if t not in invalid}
 
 
 def mean(values):
@@ -41,7 +79,7 @@ def gate_summary(event):
                 repeat_agreement=repeated.count(modal)/10 if valid else None)
 
 
-def actual_volatility(events, connection, tables, config, clock):
+def actual_volatility(events, connection, tables, config, clock, directory=None):
     """Read-only visibility using saved Phase 4/5 outcomes or exact cached 5m data.
 
     No network fetching, DB writes, interpolation or new RV definition. Cached
@@ -73,16 +111,19 @@ def actual_volatility(events, connection, tables, config, clock):
             missing.append(event)
     if missing:
         try:
-            candles = load_candles()
+            candles = load_candles(directory)
             consistent = []
             for event in missing:
-                raw = event.get('target_raw_json')
-                if raw:
-                    target = json.loads(raw)
-                    last = candles.get(event['target']+3300)
-                    if last is None or int(target[0])!=event['target'] or float(last[4])!=float(target[4]):
-                        continue
-                consistent.append(dict(event,target_candle_time=event['target']))
+                try:
+                    raw = event.get('target_raw_json')
+                    if raw:
+                        target = json.loads(raw)
+                        last = candles.get(event['target']+3300)
+                        if last is None or int(target[0])!=event['target'] or float(last[4])!=float(target[4]):
+                            continue
+                    consistent.append(dict(event,target_candle_time=event['target']))
+                except (ValueError, TypeError, KeyError, IndexError):
+                    continue
             assigned, _ = assign_rv(consistent,candles,config)
             for event in assigned:
                 outcomes[event['target']].update(actual_volatility=event['rv'],actual_regime=event['regime'],
@@ -114,11 +155,17 @@ def report(path):
             cfg = json.loads(state['config_json'])
             visible = {e['target']:e for e in events[-24:]}
             visible.update({e['target']:e for e in [r for r in events if r['gate']=='accepted'][-12:]})
-            actuals = actual_volatility(list(visible.values()),c,tables,cfg['gate']['volatility_config'],time.time())
+            actuals = actual_volatility(list(visible.values()),c,tables,cfg['gate']['volatility_config'],time.time(),Path(path).resolve().parent)
     except sqlite3.OperationalError:
         result['status'] = 'Phase 6 database unavailable'
         return result
     cfg = json.loads(state['config_json'])
+    for event in events:
+        status = actuals.get(event['target'], {}).get('actual_volatility_status')
+        event['actual_direction_status'] = 'pending' if status == 'pending' else 'complete' if event['actual_direction'] is not None else 'unavailable'
+        event['actual_return_status'] = 'pending' if status == 'pending' else 'complete' if event['actual_return'] is not None else 'unavailable'
+        if status == 'pending':
+            event['actual_return'] = event['actual_direction'] = None
     accepted = [e for e in events if e['gate']=='accepted']
     # Scheduled hours through the last recorded event include absent scheduler cycles.
     end = max(e['target'] for e in accepted) if len(accepted)>=cfg['stop']['accepted_gates'] else int(time.time())//3600*3600
@@ -131,9 +178,9 @@ def report(path):
         pending=sum(e['gate']=='pending' for e in events), all_hours=all_hours, recorded_hours=len(events),
         missing_hours=max(0,all_hours-len(events)), single_active=single_active,
         scored_events=sum(e['actual_direction'] in ('UP','DOWN') for e in accepted),
-        recent_accepted=[{**{k:e[k] for k in ('target','single_class','active_votes','actual_return','actual_direction')}, **actuals[e['target']], **gate_summary(e)} for e in accepted[-12:][::-1]],
+        recent_accepted=[{**{k:e[k] for k in ('target','single_class','active_votes','actual_return','actual_direction','actual_return_status','actual_direction_status')}, **actuals[e['target']], **gate_summary(e)} for e in accepted[-12:][::-1]],
         recent_predictions=[{k:p[k] for k in ('target','method','status','direction','p_up','p_down','version','model_version','correct','brier','signed_pnl','reason')} for p in predictions if p['target'] in {e['target'] for e in accepted[-12:]}],
-        recent=[{**{k:e[k] for k in ('target','gate','single_class','active_votes','reason','actual_return')},
+        recent=[{**{k:e[k] for k in ('target','gate','single_class','active_votes','reason','actual_return','actual_return_status','actual_direction_status')},
             **actuals[e['target']], 'actual_direction':e['actual_direction'], **gate_summary(e)} for e in events[-24:][::-1]],
         ensemble_membership=[dict(target=p['target'],method=p['method'],status=p['status'],
             eligible=(json.loads(p['audit_json']) or {}).get('eligible', []))
@@ -193,7 +240,7 @@ def format_value(key, value, row=None):
     if key in ('actual_volatility','actual_regime') and value is None:
         return row.get('actual_volatility_status','pending')
     if key in ('actual_return','actual_direction') and value is None:
-        return 'pending'
+        return row.get(key+'_status','pending')
     if value is None:
         return '—'
     if key in ('actual_return','signed_pnl','mean_signed_pnl','pnl_difference'):
@@ -219,7 +266,7 @@ def display_records(rows):
               'eligible': 'Eligible Direction Methods'}
     if not rows:
         return records_table([])
-    keys = list(dict.fromkeys(k for row in rows for k in row if k != 'actual_volatility_status'))
+    keys = list(dict.fromkeys(k for row in rows for k in row if not k.endswith('_status')))
     return styled_table(
         [labels.get(k,k.replace('_',' ').capitalize()) for k in keys],
         [[('—' if row.get(k) is None else str(row[k])+'/10') if k == 'active_votes'
