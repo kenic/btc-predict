@@ -3,7 +3,13 @@ __pycache__/
 *.pyc
 .env
 *.db
+*.db.*
+*.sqlite
+*.sqlite
 *.sqlite3
+*.backup*
+*.bak
+*.old
 logs/
 
 backups/
