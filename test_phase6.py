@@ -628,7 +628,10 @@ class RuntimeTests(unittest.TestCase):
         self.run_hour()
         p6.evaluate(lambda t:[t,90,120,100,99.82948820898182,1],clock=7200)
         with p6.database() as c:
-            c.execute("INSERT INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv,evaluated_at) VALUES(3600,'start','complete','saved',.1,.4127123456789,'evaluated')")
+            # Bind floats like the production writers do; a decimal literal in SQL
+            # text may parse to a neighbouring double and break exact comparison.
+            c.execute("INSERT INTO phase5_predictions(target_candle_time,started_at,status,context,previous_rv,actual_rv,evaluated_at) VALUES(?,?,?,?,?,?,?)",
+                      (3600,'start','complete','saved',.1,.4127123456789,'evaluated'))
         before = self.db.read_bytes()
         with app.app.test_client() as client:
             for route in ('/direction-active/','/analyze/?phase=phase6'):
