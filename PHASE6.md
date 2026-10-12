@@ -406,3 +406,74 @@ curl --fail 'https://btc.kenic.jp/analyze/?phase=phase6'
 Preserve local tracked changes and verify the service working directory first.
 No migration, worker/timer restart or `--start` command is required. This task
 does not deploy or modify the live server.
+
+## Retrospective ACTIVE detector comparison
+
+`/analyze/?phase=phase6` adds an **analysis-only** comparison of saved GPT
+regime predictions, Logistic A (three-class multinomial softmax), and Logistic B
+(direct binary ACTIVE versus NOT ACTIVE). This asks whether GPT detects ACTIVE
+better than a linear classifier and whether binary training reduces missed ACTIVE.
+It changes no live Phase 6 preregistered experiment, Phase 5 behavior, gate,
+ensemble, stopping rule, provider calls, or prediction experiment state.
+
+**Common timestamps only:** all three discrete predictions and a valid realized
+regime must exist at the same target hour. Actual ACTIVE uses the existing Phase 4
+RV definition and frozen `active_lower` threshold (inclusive). Frozen configuration
+comes from the Phase 6 start record, or saved Phase 4 config when Phase 6 has not
+started. Phase 4 rows with differing configs are excluded. GPT is the saved
+OpenAI single-shot regime forecast, not its direction forecast or repeat vote.
+Phase 4 cached forecasts take precedence over duplicate Phase 6 hours. Accepted
+and rejected Phase 6 gates are both eligible. QUIET and NORMAL collapse to NOT
+ACTIVE. Multinomial predictions use the original three-class argmax with Phase 4
+tie order; binary uses fixed probability >=0.5. No threshold tuning occurs.
+
+Both Logistic fits use the eight existing features and snapshot alignment helper.
+Expanding-window fitting at target t requires `target+3600 < t` and saved RV
+`evaluated_at < t`, complete features, 100 prior rows and ten examples per class
+(three classes for A; two for B). Scaling is past-only. Fixed settings are 400
+full-batch steps, learning rate 0.1, L2 0.01 without intercept penalty. No tuning
+or search is performed. Training targets/counts are retained in the in-memory
+report audit. Phase 2/3 saved OpenAI snapshots may supply training features where
+an existing RV label is available; their direction labels are never used.
+
+Saved evaluated Phase 4/5 RV is preferred, otherwise the existing read-only exact
+5m candle path supplies test truth. Conflicting outcomes remain unavailable.
+Archive-only labels have no historical availability proof and cannot train past
+fits; ambiguous evaluation timestamps are also excluded. This conservative rule
+can leave common N at zero. Missing training data is not reconstructed, fetched,
+or assigned an invented historical evaluation time.
+
+The primary concern is **missed ACTIVE / ACTIVE recall**, followed by false
+ACTIVE / precision. The table gives TP, FN, FP, TN, the actual/predicted ACTIVE
+denominators, accuracy, and binary Brier with probability N. GPT probabilities
+are optional; missing probabilities do not exclude discrete forecasts. Brier
+uses only available probabilities within the common discrete cohort, so differing
+Brier N must not be treated as a paired comparison. Zero denominators show a dash.
+Small N (<100 common hours or <10 actual ACTIVE outcomes) is explicitly flagged
+as a descriptive caution, not a significance threshold. No significance or
+prospective performance guarantee is claimed.
+
+No DB migration or new model/API call is needed. The report opens SQLite in
+read-only mode and holds one consistent read transaction; derived predictions
+are never inserted. Current development checkout has no live experiment DB, so
+production common N and scores must be read after deploying against that DB.
+Deployment for an already installed Phase 6 server is:
+
+```sh
+cd /opt/btc-predict
+git status --short --branch
+git pull --ff-only origin phase6
+.venv/bin/python -m unittest discover -q
+sudo systemctl restart btc-web.service
+systemctl is-active btc-web.service
+curl --fail 'https://btc.kenic.jp/analyze/?phase=phase6'
+```
+
+Preserve local tracked changes and verify the service working directory. Pull
+plus btc-web restart is sufficient; no migration, worker/timer restart, new start
+invocation, or live server operation is part of this development task.
+For a read-only metric export on the server:
+
+```sh
+.venv/bin/python -c 'import json; from active_analysis import report; r=report("btc.db"); print(json.dumps({k:v for k,v in r.items() if k != "audit"}, indent=2))'
+```

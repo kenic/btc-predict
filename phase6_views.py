@@ -1,4 +1,4 @@
-"""Read-only Phase 6 reporting. No provider calls, migrations or training."""
+"""Read-only Phase 6 reporting. No provider calls or migrations; analysis may fit retrospective detectors."""
 import itertools
 import json
 import math
@@ -380,6 +380,8 @@ def page(path, analysis=False):
         'Coverage uses available predictions, all scheduled hours (missing cycles included), observed single-shot ACTIVE '
         'hours and accepted gates. Missing-hour ACTIVE status is unknown.</p>')
     if analysis:
+        from active_analysis import render
+        content += render(path)
         content += card('GPT vs Reverse GPT · derived analysis only',
             '<p>Post-hoc anti-signal monitoring on stored GPT outputs; no additional model call.</p>'+
             display_records([{k:m[k] for k in ('method','n','accuracy','pnl_n','mean_signed_pnl')}
