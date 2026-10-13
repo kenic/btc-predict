@@ -1171,6 +1171,9 @@ def analysis_bar(stats):
 
 @app.route("/analyze/")
 def analyze():
+    if request.args.get("phase") == "phase5b":
+        from phase5b_views import page
+        return page(DB_PATH, analysis=True)
     if request.args.get("phase") == "phase6":
         from phase6_views import page
         return page(DB_PATH, analysis=True)
@@ -1276,6 +1279,16 @@ def active_direction_data():
 def regression_dashboard():
     from regression_views import page
     return page()
+
+@app.route("/phase5b/")
+def phase5b_dashboard():
+    from phase5b_views import page
+    return page(DB_PATH)
+
+@app.route("/phase5b/data.json")
+def phase5b_data():
+    from phase5b_views import report
+    return report(DB_PATH)
 
 @app.after_request
 def read_only_page_cache(response):
