@@ -1,0 +1,20 @@
+[Unit]
+Description=BTC Phase 5b independent hourly RV observation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Match the unprivileged production account before installing.
+User=btc
+Group=btc
+WorkingDirectory=/opt/btc-predict
+ExecStart=/opt/btc-predict/.venv/bin/python /opt/btc-predict/phase5b.py cycle --db /opt/btc-predict/btc.db --candles-db /opt/btc-predict/candles.db
+TimeoutStartSec=570
+Restart=no
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict

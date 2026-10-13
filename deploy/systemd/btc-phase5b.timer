@@ -1,0 +1,13 @@
+[Unit]
+Description=Observe all BTC hourly targets independently of Phase 6 gate
+
+[Timer]
+# UTC target starts at hh:00:00; allow completed inputs to settle for 90s.
+OnCalendar=*-*-* *:01:30 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=btc-phase5b.service
+
+[Install]
+WantedBy=timers.target
