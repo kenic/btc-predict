@@ -1,0 +1,19 @@
+[Unit]
+Description=BTC USD completed 5m candle archive
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Replace with the same unprivileged account used by btc-web before installing.
+User=btc
+Group=btc
+WorkingDirectory=/opt/btc-predict
+ExecStart=/opt/btc-predict/.venv/bin/python /opt/btc-predict/collect_candles.py --db /opt/btc-predict/candles.db
+TimeoutStartSec=90
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict

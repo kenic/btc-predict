@@ -37,18 +37,7 @@ def run(predictor):
         if c.execute('SELECT count(*) FROM volatility_predictions WHERE predictor=?',(predictor,)).fetchone()[0]>=prediction_limit(config):
             print('Phase 4 limit reached; skipping')
             return
-    source.validate_microstructure(cutoff)
-    candles=[source.remove_after_cutoff(source.get_candles(g),g,cutoff) for g in (3600,900,300)]
-    if any(len(x)<50 for x in candles):
-        raise RuntimeError('Not enough completed candles')
-    if any(int(x[-1][0])+g!=cutoff for x,g in zip(candles,(3600,900,300))):
-        raise RuntimeError('Stale timeframe data')
-    frames=[calculate_timeframe_indicators(x[-n:]) for x,n in zip(candles,(100,200,300))]
-    previous_rv=realized_volatility(candles[2],cutoff-3600)
-    snapshot=make_multitimeframe_snapshot(*frames).replace(
-        'Direction of the next completed 1-hour candle.',
-        'Realized volatility class of the next completed 1-hour candle.')
-    snapshot+='\n\n'+make_microstructure_snapshot(datetime.fromtimestamp(cutoff,timezone.utc))
+    snapshot, previous_rv = build_snapshot(cutoff)
     prompt=instructions(config)
     reason=''; confidence=None
     if predictor=='openai':
@@ -77,3 +66,22 @@ def run(predictor):
         reason=f'Jev choice={answer.choice}'
     save_prediction(cutoff,predictor,model,config,p,snapshot,previous_rv,classify(previous_rv,config),reason,confidence)
     print('Saved Phase 4',predictor,dict(zip(CLASSES,p)))
+
+
+def build_snapshot(cutoff):
+    import predict_gpt as source
+    from indicators import calculate_timeframe_indicators, make_multitimeframe_snapshot
+    from microstructure import make_microstructure_snapshot
+    source.validate_microstructure(cutoff)
+    candles=[source.remove_after_cutoff(source.get_candles(g),g,cutoff) for g in (3600,900,300)]
+    if any(len(x)<50 for x in candles):
+        raise RuntimeError('Not enough completed candles')
+    if any(int(x[-1][0])+g!=cutoff for x,g in zip(candles,(3600,900,300))):
+        raise RuntimeError('Stale timeframe data')
+    frames=[calculate_timeframe_indicators(x[-n:]) for x,n in zip(candles,(100,200,300))]
+    previous_rv=realized_volatility(candles[2],cutoff-3600)
+    snapshot=make_multitimeframe_snapshot(*frames).replace(
+        'Direction of the next completed 1-hour candle.',
+        'Realized volatility class of the next completed 1-hour candle.')
+    snapshot+='\n\n'+make_microstructure_snapshot(datetime.fromtimestamp(cutoff,timezone.utc))
+    return snapshot, previous_rv

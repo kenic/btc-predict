@@ -3,8 +3,22 @@ __pycache__/
 *.pyc
 .env
 *.db
+*.db.*
+*.sqlite
+*.sqlite
 *.sqlite3
+*.backup*
+*.bak
+*.old
 logs/
 
 backups/
 phase4.enabled
+
+.next-stages.lock
+next-stages-worker.log
+
+direction_history_5m.json
+direction_history_5m.tmp
+
+scratch/
