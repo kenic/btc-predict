@@ -155,3 +155,39 @@ Phase 6 direction outcomes are gate-selected and may cover only part of the 500
 hours; do not interpret them as performance over all hours. Reports before all
 500 slots are recorded are exploratory/incomplete. No percentile selector is
 implemented and no live decisions consume these reports.
+
+## Dashboard
+
+The navigation includes **Phase 5b**, with routes `/phase5b/`,
+`/phase5b/data.json` and `/analyze/?phase=phase5b`. The page displays the fixed
+500-slot window, status counts, actual-RV availability, latest 100 targets and
+percentile comparisons on common scored targets and each method's available
+scored targets. Reads use read-only SQLite connections; viewing a page never
+runs migrations, predictions or evaluation. Missing DB/schema/init and an absent
+Phase 6 schema produce an informative empty state.
+
+The dashboard follow-up changes `app.py` and `ui.py`, adds `phase5b_views.py`
+and its tests, and updates this document. These files are outside both the
+Phase 6 frozen source manifest and the Phase 5b predictor source manifest.
+An already initialized Phase 5b does **not** need reinitialization.
+
+After pushing the dashboard commit, on the server:
+
+```sh
+cd /opt/btc-predict
+git status --short --branch
+git fetch origin phase5b
+# Replace DASHBOARD_COMMIT with the reviewed follow-up commit, not the original init commit.
+git cherry-pick DASHBOARD_COMMIT
+.venv/bin/python -m unittest test_phase5b_views test_ui
+# Confirm the actual web service name before running this command.
+sudo systemctl restart btc-web.service
+curl --fail http://127.0.0.1:8001/phase5b/data.json
+```
+
+Restart only the web application to load routes/navigation. Do not restart the
+hourly prediction services or reset either experiment. If Phase 5b is not yet
+initialized, follow the original initialization/timer steps first. On this
+installation the expected execution account is `ubuntu`: confirm it against the
+existing units, use `sudo -u ubuntu` and set `User=ubuntu` / `Group=ubuntu` in the
+new observation service before installing it.
