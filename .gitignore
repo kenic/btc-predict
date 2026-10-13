@@ -20,3 +20,5 @@ next-stages-worker.log
 
 direction_history_5m.json
 direction_history_5m.tmp
+
+scratch/
