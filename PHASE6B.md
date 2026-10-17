@@ -15,7 +15,8 @@ No selector/meta-selector. Phase 5b remains independent; later JOIN using
 ## Automatic handoff and preservation
 
 Install/enable the prepared timer BEFORE Phase 6 reaches 96, after deployment
-approval. It runs at hh:01:45 UTC and takes the existing `.next-stages.lock`.
+approval. It runs at hh:01:45 UTC, loads the existing `.env` credentials just
+as the original scheduler does, and takes the existing `.next-stages.lock`.
 While Phase 6 has fewer than96 accepted targets it returns without provider calls,
 DB schema changes or start markers. Existing btc-predict.timer runs at hh:05;
 its frozen Phase 6 runner still stops at 96, as originally preregistered.

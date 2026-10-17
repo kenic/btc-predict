@@ -210,6 +210,18 @@ class Phase6bTests(unittest.TestCase):
             c.executemany("INSERT INTO phase6b_events(target,started_at,gate) VALUES(?,'start','accepted')",[(i*3600,) for i in range(98,201)])
         self.assertEqual(client.get('/phase6b/data.json').get_json()['status'],'Stopped: fixed accepted-gate limit')
 
+    def test_standalone_timer_entry_loads_env_before_cycle(self):
+        import os
+        import sys
+        root=Path(self.tmp.name)
+        (root/'.env').write_text('BTC_PHASE6B_TEST_ENV=loaded-for-cycle\n')
+        def check_env():
+            self.assertEqual(os.environ.get('BTC_PHASE6B_TEST_ENV'),'loaded-for-cycle')
+        with patch.dict(os.environ,{}), patch.object(b,'ROOT',root), patch.object(sys,'argv',['phase6b.py','cycle']), patch.object(b,'cycle',side_effect=check_env) as cycle:
+            os.environ.pop('BTC_PHASE6B_TEST_ENV',None)
+            b.main()
+            cycle.assert_called_once()
+
     def test_runtime_parity_only_permitted_changes(self):
         for name in ('volatility_slot','save_method','run','evaluate'):
             original=inspect.getsource(getattr(phase6,name)).replace('phase6_','phase6b_')

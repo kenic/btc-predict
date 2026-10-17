@@ -207,6 +207,8 @@ def main():
         if args.action == 'start':
             print(json.dumps(start(),indent=2,sort_keys=True))
         else:
+            from dotenv import load_dotenv
+            load_dotenv(ROOT/'.env')
             cycle()
 
 
