@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe Phase6b hourly after explicit Phase6 closure
+
+[Timer]
+OnCalendar=*-*-* *:01:45 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=btc-phase6b.service
+
+[Install]
+WantedBy=timers.target

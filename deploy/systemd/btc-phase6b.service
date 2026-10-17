@@ -1,0 +1,18 @@
+[Unit]
+Description=BTC Phase6b extended observation (explicit start required)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/btc-predict
+ExecStart=/opt/btc-predict/.venv/bin/python /opt/btc-predict/phase6b.py cycle
+TimeoutStartSec=570
+Restart=no
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict
