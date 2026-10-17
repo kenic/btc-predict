@@ -1174,9 +1174,9 @@ def analyze():
     if request.args.get("phase") == "phase5b":
         from phase5b_views import page
         return page(DB_PATH, analysis=True)
-    if request.args.get("phase") == "phase6":
+    if request.args.get("phase") in ("phase6", "phase6b"):
         from phase6_views import page
-        return page(DB_PATH, analysis=True)
+        return page(DB_PATH, analysis=True, cohort=request.args["phase"])
     if request.args.get("phase") in ("phase4r", "phase5"):
         from next_stage_views import page
         return page(analysis=True, section="regression" if request.args.get("phase") == "phase5" else "repeated")
@@ -1274,6 +1274,16 @@ def active_direction_dashboard():
 def active_direction_data():
     from phase6_views import report
     return report(DB_PATH)
+
+@app.route("/phase6b/")
+def phase6b_dashboard():
+    from phase6_views import page
+    return page(DB_PATH, cohort='phase6b')
+
+@app.route("/phase6b/data.json")
+def phase6b_data():
+    from phase6_views import report
+    return report(DB_PATH, cohort='phase6b')
 
 @app.route("/regression/")
 def regression_dashboard():

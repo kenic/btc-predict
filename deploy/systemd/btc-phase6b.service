@@ -1,5 +1,5 @@
 [Unit]
-Description=BTC Phase6b extended observation (explicit start required)
+Description=BTC Phase6b automatic continuation after Phase6 accepted96
 Wants=network-online.target
 After=network-online.target
 

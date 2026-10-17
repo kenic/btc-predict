@@ -4,13 +4,13 @@ from html import escape
 NAV = (('current', '/', 'Current'), ('direction', '/direction/', 'Direction'),
        ('volatility', '/volatility/', 'Volatility'), ('repeated', '/repeated/', 'Repeated'),
        ('regression', '/regression/', 'Regression'), ('phase5b', '/phase5b/', 'Phase 5b'),
-       ('phase6', '/direction-active/', 'Active Direction'), ('analysis', '/analyze/', 'Analysis'))
+       ('phase6', '/direction-active/', 'Active Direction'), ('phase6b', '/phase6b/', 'Phase 6b'), ('analysis', '/analyze/', 'Analysis'))
 
 
 def analysis_filters(phase):
     choices = (('all', 'All direction phases'), ('phase1', 'Phase 1'), ('phase2', 'Phase 2'),
                ('phase3', 'Phase 3'), ('phase4', 'Volatility'), ('phase4r', 'Repeated'), ('phase5', 'Regression'),
-               ('phase5b', 'Phase 5b'), ('phase6', 'Active Direction'))
+               ('phase5b', 'Phase 5b'), ('phase6', 'Active Direction'), ('phase6b', 'Phase 6b'))
     return '<nav class="filters" aria-label="Analysis experiment">' + ''.join(
         f'<a href="/analyze/?phase={key}"' + (' aria-current="page"' if key == phase else '') + f'>{label}</a>'
         for key, label in choices) + '</nav>'

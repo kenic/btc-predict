@@ -12,6 +12,8 @@ import phase6
 import phase6b as b
 import phase6b_runtime as runtime
 import phase6_methods as methods
+import phase6_views
+import app
 from test_phase6 import snapshot
 
 
@@ -19,7 +21,7 @@ class Phase6bTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = Path(self.tmp.name)/'test.db'
-        self.patches = [patch.object(m,'DB_PATH',self.db) for m in (phase4,next_stages,phase6,b)]
+        self.patches = [patch.object(m,'DB_PATH',self.db) for m in (phase4,next_stages,phase6,b,app)]
         for p in self.patches: p.start()
         phase4.init_schema(); next_stages.migrate(); phase6.migrate()
         cfg = phase6.design({'quiet_upper':.2,'active_lower':.4},'test-model')
@@ -28,6 +30,7 @@ class Phase6bTests(unittest.TestCase):
             c.execute('INSERT INTO phase6_config VALUES(1,?,?,?,?,?)',
                 (json.dumps(cfg),phase4.config_hash(cfg),'start',3600,'original'))
         self.calls = []
+        self.runtime_run = runtime.run
 
     def tearDown(self):
         for p in reversed(self.patches): p.stop()
@@ -48,7 +51,7 @@ class Phase6bTests(unittest.TestCase):
         defaults=dict(clock=target,builder=lambda t:(snapshot(t),.2),class_call=call,
             gpt_call=lambda context,model:dict(methods.output(p_up=.7),raw_json='raw',model_version=model))
         defaults.update(kwargs)
-        (phase6 if original else runtime).run(target,**defaults)
+        (phase6.run if original else self.runtime_run)(target,**defaults)
 
     def test_95_96_97_closure_and_primary_immutability(self):
         self.seed(95)
@@ -57,22 +60,27 @@ class Phase6bTests(unittest.TestCase):
         self.assertEqual(len(self.calls),11)
         self.run_hour(97*3600,original=True)
         self.assertEqual(len(self.calls),11)  # Original really stops at96.
-        with self.assertRaisesRegex(RuntimeError,'all 96'): self.start()
-        phase6.evaluate(lambda t:[t,100,110,90,101,1],clock=97*3600)
-        with b.database() as c: before=phase6_snapshot(c)
-        first=self.start()
+        first=self.start()  # Pending96th actual must not delay97th target.
         self.assertEqual(first['runtime_config']['start_target'],97*3600)
+        self.assertFalse(b.status()['phase6_results_sealed'])
         self.assertEqual(first,b.start(clock=999999))
         self.run_hour(96*3600)  # No old-target backfill.
         self.assertEqual(len(self.calls),11)
         self.run_hour(97*3600)
         self.assertEqual(len(self.calls),22)
+        # Original evaluator completes96 while 6b is already running.
+        phase6.evaluate(lambda t:[t,100,110,90,101,1],clock=97*3600)
+        with b.database() as c:
+            b.validate(c)
+            b.seal_primary(c)
+            before=phase6_snapshot(c)
         runtime.evaluate(lambda t:[t,100,110,90,102,1],clock=98*3600)
         with b.database() as c:
             self.assertEqual(before,phase6_snapshot(c))
             row=c.execute("SELECT * FROM phase6b_predictions WHERE method='always_up'").fetchone()
             self.assertAlmostEqual(row['signed_pnl'],2)
             self.assertEqual(row['correct'],1)
+        self.assertTrue(b.status()['phase6_results_sealed'])
         self.assertEqual(b.status()['cumulative_accepted'],97)
 
     def test_199_200_stop_and_final_evaluation(self):
@@ -90,7 +98,7 @@ class Phase6bTests(unittest.TestCase):
 
     def test_unstarted_and_hash_drift_fail_before_calls(self):
         self.seed()
-        with self.assertRaisesRegex(RuntimeError,'not been explicitly'): self.run_hour(97*3600)
+        with self.assertRaisesRegex(RuntimeError,'not started'): self.run_hour(97*3600)
         self.start()
         with patch.object(b,'hashes',return_value={}):
             with self.assertRaisesRegex(RuntimeError,'implementation changed'): self.run_hour(97*3600)
@@ -132,6 +140,75 @@ class Phase6bTests(unittest.TestCase):
         before=self.db.read_bytes()
         self.assertFalse(b.status()['phase6b_started'])
         self.assertEqual(before,self.db.read_bytes())
+
+    def test_automatic_cycle_waits_without_writes_before96(self):
+        self.seed(65)
+        before=self.db.read_bytes()
+        with patch('predict_gpt.get_prediction_cutoff',return_value=66*3600), patch.object(runtime,'run') as run, patch.object(b,'start') as start:
+            b.cycle()
+            run.assert_not_called(); start.assert_not_called()
+        self.assertEqual(before,self.db.read_bytes())
+        with b.database() as c:
+            self.assertFalse(c.execute("SELECT 1 FROM sqlite_master WHERE name LIKE 'phase6b_%'").fetchone())
+
+    def test_auto_handoff_no_evaluation_gap_no_duplicate_and_final_seal(self):
+        self.seed(95); self.run_hour(96*3600,original=True)
+        self.calls.clear()
+        with patch('predict_gpt.get_prediction_cutoff',return_value=97*3600), patch.object(b.subprocess,'check_output',side_effect=['auto-sha','']), patch.object(runtime,'run',side_effect=self.run_hour), patch.object(runtime,'evaluate'):
+            b.cycle()
+            b.cycle()  # Same hour cannot repeat calls or reset start.
+        self.assertEqual(len(self.calls),11)
+        self.assertEqual(b.status()['cumulative_accepted'],97)
+        self.assertFalse(b.status()['phase6_results_sealed'])
+        phase6.evaluate(lambda t:[t,100,110,90,101,1],clock=97*3600)
+        with patch('predict_gpt.get_prediction_cutoff',return_value=98*3600), patch.object(runtime,'run'), patch.object(runtime,'evaluate'):
+            b.cycle()
+        self.assertTrue(b.status()['phase6_results_sealed'])
+        with b.database() as c:
+            c.execute('UPDATE phase6_predictions SET signed_pnl=999 WHERE target=? AND method=?',(96*3600,'gpt'))
+        with self.assertRaisesRegex(RuntimeError,'Final Phase6'): b.status()
+
+    def test_already_evaluated_results_protected_while_last_actual_pending(self):
+        self.seed(95); self.run_hour(96*3600,original=True); self.start()
+        with b.database() as c:
+            c.execute('UPDATE phase6_events SET actual_return=999 WHERE target=3600')
+        with self.assertRaisesRegex(RuntimeError,'Previously evaluated'): b.status()
+
+    def test_phase6b_pages_prestart_and_cohort_isolation_are_readonly(self):
+        self.seed(95); self.run_hour(96*3600,original=True)
+        client=app.app.test_client()
+        before=self.db.read_bytes()
+        self.assertIn('Waiting for automatic handoff',client.get('/phase6b/').get_data(as_text=True))
+        self.assertFalse(client.get('/phase6b/data.json').get_json()['manifest'])
+        self.assertEqual(before,self.db.read_bytes())
+        self.start(); self.run_hour(97*3600)
+        runtime.evaluate(lambda t:[t,100,110,90,102,1],clock=98*3600)
+        with patch.object(phase6_views,'load_candles',return_value={}):
+            before=self.db.read_bytes()
+            primary=client.get('/direction-active/data.json').get_json()
+            extended=client.get('/phase6b/data.json').get_json()
+            self.assertEqual(primary['accepted'],96)
+            self.assertEqual(extended['accepted'],1)
+            self.assertEqual(extended['accepted_limit'],104)
+            self.assertEqual(extended['cumulative_accepted'],97)
+            self.assertEqual(len(extended['recent_accepted']),1)
+            self.assertEqual(extended['recent_accepted'][0]['target'],97*3600)
+            self.assertEqual(extended['config'],primary['config'])
+            gpt=next(m for m in extended['methods'] if m['method']=='gpt')
+            self.assertEqual(gpt['n'],1)
+            self.assertAlmostEqual(gpt['mean_signed_pnl'],2)
+            for route in ('/phase6b/','/analyze/?phase=phase6b'):
+                page=client.get(route)
+                self.assertEqual(page.status_code,200)
+                html=page.get_data(as_text=True)
+                self.assertIn('Phase 6b',html)
+                self.assertIn('Accepted / 104',html)
+                self.assertIn('Cumulative accepted / 200',html)
+                self.assertNotIn('retrospective ACTIVE detector',html)
+            self.assertEqual(before,self.db.read_bytes())
+        with b.database() as c:
+            c.executemany("INSERT INTO phase6b_events(target,started_at,gate) VALUES(?,'start','accepted')",[(i*3600,) for i in range(98,201)])
+        self.assertEqual(client.get('/phase6b/data.json').get_json()['status'],'Stopped: fixed accepted-gate limit')
 
     def test_runtime_parity_only_permitted_changes(self):
         for name in ('volatility_slot','save_method','run','evaluate'):

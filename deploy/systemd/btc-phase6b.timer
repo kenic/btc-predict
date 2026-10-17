@@ -1,5 +1,5 @@
 [Unit]
-Description=Observe Phase6b hourly after explicit Phase6 closure
+Description=Observe Phase6b hourly automatically after Phase6 accepted96
 
 [Timer]
 OnCalendar=*-*-* *:01:45 UTC

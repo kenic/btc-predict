@@ -172,8 +172,12 @@ def actual_volatility(events, connection, tables, config, clock, directory=None)
     return outcomes
 
 
-def report(path):
-    result = dict(status='Not started', config=None, config_hash=None, code_sha=None,
+def report(path, cohort='phase6'):
+    if cohort not in ('phase6', 'phase6b'):
+        raise ValueError('Unknown direction cohort')
+    limit = 104 if cohort == 'phase6b' else 96
+    result = dict(status='Not started', cohort=cohort, accepted_limit=limit, primary_accepted=0,
+                  cumulative_accepted=0, primary_results_sealed=False, manifest=None, config=None, config_hash=None, code_sha=None,
                   accepted=0, rejected=0, pending=0, all_hours=0, recorded_hours=0,
                   missing_hours=0, single_active=0, scored_events=0, methods=[], paired=[],
                   recent=[], recent_accepted=[], recent_predictions=[], missing=[], ensemble_membership=[])
@@ -182,20 +186,35 @@ def report(path):
             c.row_factory = sqlite3.Row
             c.execute('BEGIN')
             tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if 'phase6_config' not in tables:
+            if 'phase6_events' in tables:
+                result['primary_accepted'] = c.execute("SELECT count(*) FROM phase6_events WHERE gate='accepted'").fetchone()[0]
+            result['cumulative_accepted'] = result['primary_accepted']
+            if 'phase6b_events' in tables:
+                result['cumulative_accepted'] += c.execute("SELECT count(*) FROM phase6b_events WHERE gate='accepted'").fetchone()[0]
+            if 'phase6b_primary_final' in tables:
+                result['primary_results_sealed'] = bool(c.execute('SELECT 1 FROM phase6b_primary_final').fetchone())
+            if cohort == 'phase6b':
+                result['status'] = 'Waiting for Phase 6 to reach 96 accepted ACTIVE targets'
+                if 'phase6b_manifest' in tables:
+                    saved = c.execute('SELECT manifest_json FROM phase6b_manifest').fetchone()
+                    if saved:
+                        result['manifest'] = json.loads(saved[0])
+                if result['primary_accepted'] == 96:
+                    result['status'] = 'Waiting for automatic handoff at the next hourly cycle'
+            if cohort+'_config' not in tables:
                 return result
-            state = c.execute('SELECT * FROM phase6_config').fetchone()
+            state = c.execute('SELECT * FROM '+cohort+'_config').fetchone()
             if state is None:
                 return result
-            events = [dict(r) for r in c.execute('SELECT * FROM phase6_events ORDER BY target')]
-            predictions = [dict(r) for r in c.execute('''SELECT p.*,e.actual_return,e.actual_direction FROM phase6_predictions p
-                JOIN phase6_events e USING(target) WHERE e.gate='accepted' ORDER BY p.target,p.method''')]
+            events = [dict(r) for r in c.execute('SELECT * FROM '+cohort+'_events ORDER BY target')]
+            predictions = [dict(r) for r in c.execute(f'''SELECT p.*,e.actual_return,e.actual_direction FROM {cohort}_predictions p
+                JOIN {cohort}_events e USING(target) WHERE e.gate='accepted' ORDER BY p.target,p.method''')]
             cfg = json.loads(state['config_json'])
             visible = {e['target']:e for e in events[-24:]}
             visible.update({e['target']:e for e in [r for r in events if r['gate']=='accepted'][-12:]})
             actuals = actual_volatility(list(visible.values()),c,tables,cfg['gate']['volatility_config'],time.time(),Path(path).resolve().parent)
     except sqlite3.OperationalError:
-        result['status'] = 'Phase 6 database unavailable'
+        result['status'] = ('Phase 6b' if cohort=='phase6b' else 'Phase 6')+' database unavailable'
         return result
     predictions += [reverse_gpt(p) for p in predictions if p['method']=='gpt']
     cfg = json.loads(state['config_json'])
@@ -207,11 +226,11 @@ def report(path):
             event['actual_return'] = event['actual_direction'] = None
     accepted = [e for e in events if e['gate']=='accepted']
     # Scheduled hours through the last recorded event include absent scheduler cycles.
-    end = max(e['target'] for e in accepted) if len(accepted)>=cfg['stop']['accepted_gates'] else int(time.time())//3600*3600
+    end = max(e['target'] for e in accepted) if len(accepted)>=limit else int(time.time())//3600*3600
     all_hours = max(0,(end-state['start_target'])//3600+1)
     all_hours = max(all_hours,len(events))
     single_active = sum(e['single_class']=='ACTIVE' for e in events)
-    result.update(status='Stopped: fixed accepted-gate limit' if len(accepted)>=96 else 'Prospective experiment running',
+    result.update(status='Stopped: fixed accepted-gate limit' if len(accepted)>=limit else 'Prospective experiment running',
         config=cfg, config_hash=state['config_hash'], code_sha=state['code_sha'], started_at=state['started_at'],
         start_target=state['start_target'], accepted=len(accepted), rejected=sum(e['gate']=='rejected' for e in events),
         pending=sum(e['gate']=='pending' for e in events), all_hours=all_hours, recorded_hours=len(events),
@@ -313,10 +332,12 @@ def display_records(rows):
           else format_value(k,row.get(k),row) for k in keys] for row in rows])
 
 
-def page(path, analysis=False):
+def page(path, analysis=False, cohort='phase6'):
     from html import escape
-    data = report(path)
-    introduction = ('<h1>Active Direction — Phase 6</h1>'
+    data = report(path, cohort=cohort)
+    label = 'Phase 6b' if cohort == 'phase6b' else 'Phase 6'
+    limit = data['accepted_limit']
+    introduction = (f'<h1>Active Direction — {label}</h1>'
         '<p>Prospective high-confidence-ACTIVE direction prediction. '
         'Phase 1–3 retrospective ACTIVE accuracy was approximately 34.9% for OpenAI and 41.9% for Jev. '
         'ACTIVE is not assumed easier: this experiment compares alternative conditional signals prospectively.</p>')
@@ -327,8 +348,8 @@ def page(path, analysis=False):
         '<li>Repeat agreement &gt;= 8/10</li></ul>'
         '<p>All ten repeats must be valid; ACTIVE repeat agreement &gt;= 8/10 is required. '
         'Effective sample count is accepted distinct target hours, not API calls. '
-        'Stop after 96 accepted distinct target hours, including gates with missing direction outputs; no optional stopping.</p>')
-    counts = metric_blocks([('Accepted / 96',str(data['accepted'])+' / 96'),
+        f'Stop after {limit} accepted distinct target hours, including gates with missing direction outputs; no optional stopping.</p>')
+    counts = metric_blocks([(f'Accepted / {limit}',str(data['accepted'])+f' / {limit}'),
         ('Rejected / NO SIGNAL',data['rejected']),('Pending',data['pending']),('Scored ACTIVE events',data['scored_events']),
         ('All scheduled hours',data['all_hours']),('Missing hours',data['missing_hours']),('Single-shot ACTIVE hours',data['single_active'])])
     gate_content = '<p>'+escape(data['status'])+'</p>'+gate_help+counts
@@ -336,6 +357,16 @@ def page(path, analysis=False):
         current = data['recent'][0]
         gate_content += '<h3>Latest saved gate</h3>'+display_records([{k:current[k] for k in (
             'target','gate','single_class','repeat_modal_class','repeat_agreement','active_votes','reason')}])
+    introduction += ('<nav class="filters" aria-label="Direction cohort">'
+        '<a href="/direction-active/">Phase 6 · primary 96</a>'
+        '<a href="/phase6b/">Phase 6b · additional 104</a>'
+        f'<a href="/analyze/?phase={cohort}">Analyze {label}</a></nav>')
+    if cohort == 'phase6b':
+        introduction += ('<p>Extended replication of Phase 6. The gate, predictors and evaluation are unchanged. '
+            '104 additional accepted ACTIVE targets; cumulative stop = 200. No optional stopping.</p>')
+        introduction += metric_blocks([('Phase 6 accepted / 96',str(data['primary_accepted'])+' / 96'),
+            ('Cumulative accepted / 200',str(data['cumulative_accepted'])+' / 200'),
+            ('Phase 6 final results', 'Sealed' if data['primary_results_sealed'] else 'Pending final seal')])
     content = introduction+card('Volatility Gate',gate_content)
     fields = ('method','n','correct','accuracy','brier_n','brier','pnl_n','mean_signed_pnl',
               'mean_absolute_return','median_absolute_return','coverage_all','coverage_active','coverage_accepted')
@@ -380,8 +411,9 @@ def page(path, analysis=False):
         'Coverage uses available predictions, all scheduled hours (missing cycles included), observed single-shot ACTIVE '
         'hours and accepted gates. Missing-hour ACTIVE status is unknown.</p>')
     if analysis:
-        from active_analysis import render
-        content += render(path)
+        if cohort == 'phase6':
+            from active_analysis import render
+            content += render(path)
         content += card('GPT vs Reverse GPT · derived analysis only',
             '<p>Post-hoc anti-signal monitoring on stored GPT outputs; no additional model call.</p>'+
             display_records([{k:m[k] for k in ('method','n','accuracy','pnl_n','mean_signed_pnl')}
@@ -405,9 +437,13 @@ def page(path, analysis=False):
         'Open hours are pending; missing/conflicting completed-hour data is unavailable.</p>'+display_records(data['recent']))
     content += card('Missing / abstaining outputs · never backfilled',display_records(data['missing'][-60:]))
     if data['config']:
-        content += card('Frozen preregistration', '<p>Started: '+escape(data['started_at'])+' · Code: '+escape(data['code_sha'])+
-            ' · Config hash: '+escape(data['config_hash'])+'</p><p>Terminology normalized for display; stored preregistration is unchanged.</p>'
+        content += card('Original Phase 6 frozen design' if cohort == 'phase6b' else 'Frozen preregistration', '<p>Started: '+escape(data['started_at'])+' · Code: '+escape(data['code_sha'])+
+            ' · Config hash: '+escape(data['config_hash'])+'</p><p>Terminology normalized for display; stored preregistration is unchanged.</p>'+
+            ('<p>The original stop of 96 below belongs to Phase 6. Phase 6b uses the observation manifest: 104 additional, 200 cumulative.</p>' if cohort=='phase6b' else '')+
             '<details><summary>Frozen design</summary><pre>'+
             escape(display_text(json.dumps(data['config'],indent=2,sort_keys=True)))+'</pre></details>')
-    return page_shell('Active Direction — Phase 6',content,'analysis' if analysis else 'phase6',
-                      phase='phase6' if analysis else None,refresh=300)
+    if data['manifest'] and cohort == 'phase6b':
+        content += card('Phase 6b observation manifest', '<details><summary>Observation horizon and handoff record</summary><pre>'+
+                        escape(json.dumps(data['manifest'],indent=2,sort_keys=True))+'</pre></details>')
+    return page_shell('Active Direction — '+label,content,'analysis' if analysis else cohort,
+                      phase=cohort if analysis else None,refresh=300)

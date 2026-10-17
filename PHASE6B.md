@@ -1,108 +1,120 @@
-# Phase 6b — extended replication / observation
+# Phase 6b — automatic extended replication / observation
 
 Purpose: Extended replication / observation of Phase 6.
-Start: Immediately after Phase 6 reaches its preregistered 96 accepted ACTIVE
- targets, their actuals are evaluated and the operator explicitly records closure.
+Start: the first hourly target after Phase 6 reaches 96 accepted ACTIVE targets.
 Stop: cumulative accepted ACTIVE targets = 200 (104 additional after Phase 6).
 Change from Phase 6: observation horizon only. No optional stopping.
 
 Unchanged: single-shot ACTIVE volatility, ten-repeat modal ACTIVE, repeat
-agreement >=8/10, all direction predictors and ensembles, logistic training
-procedure (expanding strictly prior evaluated samples), GPT prompt/model settings,
-next-hour target definition, metrics, and signed PnL (percentage return times
-long/short sign, zero for flat, no fees). No selector/meta-selector.
-Phase5b stays independent; JOIN on `phase6b_events.target =
-phase5b_predictions.target_candle_time` using the existing hourly timestamps.
+agreement >=8/10, direction predictors and ensembles, expanding strictly prior
+evaluated logistic training samples, GPT prompt/model settings, next-hour target,
+metrics and signed PnL (percent return times direction sign, flat zero, no fees).
+No selector/meta-selector. Phase 5b remains independent; later JOIN using
+`phase6b_events.target = phase5b_predictions.target_candle_time`.
 
-## Design and preservation
+## Automatic handoff and preservation
 
-No existing tracked file is changed. In particular phase6.py, phase6_methods.py,
-next_stages.py and every other original implementation-hashed source stay byte
-identical. Phase6's saved config and stop=96 remain intact. Its scheduler keeps
-running normally and stops creating targets at 96. Existing Phase6 dashboard
-queries continue to describe only the original Phase6 results.
+Install/enable the prepared timer BEFORE Phase 6 reaches 96, after deployment
+approval. It runs at hh:01:45 UTC and takes the existing `.next-stages.lock`.
+While Phase 6 has fewer than96 accepted targets it returns without provider calls,
+DB schema changes or start markers. Existing btc-predict.timer runs at hh:05;
+its frozen Phase 6 runner still stops at 96, as originally preregistered.
 
-`phase6b.py start` takes the same `.next-stages.lock` as the existing scheduler.
-It requires exactly 96 accepted Phase6 events, all actuals evaluated, no pending
-gates, and no unfinished accepted calls/predictions. It verifies the original
-preregistration/config/source hashes and a clean committed tracked checkout.
-It inserts a closure record and the new start config in a single transaction.
-No Phase6 record is updated. The closure stores the ordered 96 target timestamps
-and a digest of their event/call/prediction rows, plus the original config digest.
-Every 6b cycle rechecks this closure and both sets of frozen hashes before calls.
-Repeated start validates and returns the existing marker; it never resets it.
-No automatic start, backfill or replacement. Missing data remain missing.
+On the next hourly cycle after 96, the new runner automatically records membership
+closure and starts 6b for that hourly target. Manual `start` is unnecessary and
+Phase 6 evaluation completion is NOT a prerequisite. Example: Phase 6 accepts its
+96th target at H:05; at H+1:01:45 the timer starts the next target in 6b, even if
+Phase 6's last actual will only be evaluated by its normal H+1:05 cycle. Additional
+accepted gates are numbered1..104 within 6b, equivalent to cumulative97..200.
+A rejected gate is still saved as6b but does not increment the accepted count.
+Missing calls, hours and outputs are not backfilled or replaced.
 
-6b stores observations exclusively in `phase6b_events`, `phase6b_calls` and
-`phase6b_predictions`. `phase6b_config` retains the exact original config JSON,
-with a new start timestamp/boundary and code SHA; `phase6b_manifest` explicitly
-records the different horizon (104 additional, 200 cumulative), closure, manifest
-version and new implementation hashes. These tables are created only on explicit
-start. The original JSON's 96 stop describes the primary experiment; the manifest
-and runtime ADDITIONAL=104 govern 6b. All observations in these tables belong to
-6b, so no original rows need relabeling. Accepted ordinal 1 in 6b is cumulative97.
+The Phase 6 config and stop=96 remain byte-identical. No frozen implementation
+source is changed (phase6.py, phase6_methods.py, next_stages.py, phase4_runner.py,
+volatility.py, predict_gpt.py, indicators.py, microstructure.py). Both source and
+original config hashes must match. app.py, phase6_views.py and ui.py only change
+read-only presentation and are outside the original frozen hash set.
 
-`phase6b_runtime.py` is a storage-isolated copy of four frozen runtime functions.
-Tests compare their ASTs to Phase6, allowing only namespace, manifest validation,
-and additional stop-limit substitutions. Prediction helpers, the GPT prompt,
-gate, logistic implementation and ensemble calculations are imported directly
-from original frozen sources. Training combines the existing legacy/Phase6
-snapshot pool with past Phase6b snapshots, deduplicates targets, and uses the
-same logistic cutoff/standardization/filtering. Evaluation writes only 6b tables.
-The shared scheduler lock serializes all 6/6b starts/cycles across processes.
-At 104 accepted new targets, prediction stops; evaluation continues to collect
-final actuals. The timer can remain enabled for this purpose.
+`phase6b_manifest` v2 freezes the ordered96 target timestamps, their input/gate/
+call/prediction fields, the original config record, and all outcomes already
+completed at handoff. Only previously pending outcome fields may subsequently
+be populated by the ORIGINAL Phase 6 evaluator. The6b runner never updates any
+Phase 6 table. Once all 96 evaluations are complete, a single final result digest
+is appended to `phase6b_primary_final`. Every cycle validates both the membership
+snapshot and previously completed outcomes, and validates the final digest once
+sealed. Thus6b observations do not delay or redefine the formal primary 96 result.
 
-## Prepared against production (2026-10-17)
+`phase6b_config` stores the exact original config JSON, new start metadata and
+code SHA. The JSON's96 stop belongs to the primary experiment; the 6b manifest
+and ADDITIONAL=104 govern the extension. New source hashes, including this
+manifest documentation and timer definitions, freeze at handoff. A clean committed
+tracked checkout is required. Repeated starts validate the existing marker and
+never reset it. The unstarted original v1 preparation is superseded by v2; do not
+reset a started v1 experiment or attempt to silently migrate its saved manifest.
 
-Host ubuntu@nepp, /opt/btc-predict: main at 3b3b114, two local commits beyond
-remote main 661a068 (Phase5b implementation and dashboard); tracked tree clean.
-Untracked plots and candles.db WAL/SHM were excluded. Phase6 count was65/96,
-all65 evaluated; original frozen hashes matched. Phase6 start config hash:
-448e17d05b20a0644a36c5be0ac0be4354053ab93edfadd977356fb7125683cf.
-Existing btc-predict.timer runs at hh:05 and executes run_hourly.sh as ubuntu;
-Phase5b's independent timer runs at hh:01:30. No production code/DB/systemd
-changes or Phase6b start were performed during preparation.
+`phase6b_runtime.py` isolates events/calls/predictions in dedicated 6b tables.
+AST parity tests permit only table namespace, validation and horizon substitutions
+in the four copied runtime functions. Gate, GPT call, rules, ensembles and
+logistic are imported from the existing frozen code. Training combines legacy/
+Phase 6 snapshots and6b snapshots, preserving deduplication, strict cutoff,
+standardization and fitting. Prediction still precedes evaluation. At additional 104,
+new prediction stops; later timer ticks continue final6b evaluations.
+A technical interruption fails closed without retry/replacement or performance-
+based changes to the stopping rule.
 
-## Operator transition — only after 96 and approval to deploy/start
+## Dashboard
 
-Do not run the old scheduler manually as a check. Let its normal hourly cycle
-finish the 96th actual evaluation (normally the following hour). The following
-commands are a future operator runbook, not preparation-time actions. First
-transfer/review the prepared phase6b branch/commit using the normal approved
-Git workflow. In /opt/btc-predict verify status and remote refs; preserve local
-commits and untracked files. The branch descends from production3b3b114, so only
-a fast-forward is allowed; stop and review if the production branch has diverged.
+- `/direction-active/` and `/direction-active/data.json`: primary Phase 6 only.
+- `/phase6b/` and `/phase6b/data.json`: additional6b results only, accepted/104,
+  cumulative accepted/200, and primary final-seal status.
+- `/analyze/?phase=phase6b`:6b method metrics and paired comparisons.
+- Main navigation and analysis filters link to6b; both direction pages link to
+  each other. Before handoff the 6b page displays waiting status and primary count.
+
+The6b metrics use its own 104 limit, not the 96 in the inherited original JSON.
+Retrospective detectors that query only primary Phase 6 are not mislabeled as6b.
+All pages use read-only SQLite connections and never start/migrate experiments,
+fetch market data or make provider calls. Original and additional cohorts remain
+separately labeled; the cumulative number is a count, not a pooled score.
+
+## Production preflight and approved deployment
+
+Preparation inspected ubuntu@nepp:/opt/btc-predict: main 3b3b114, two local commits
+beyond origin/main 661a068; tracked tree clean, original frozen hashes matching,
+65 accepted and 65 evaluated, no 6b tables or installed6b timer. Untracked plots,
+DB/WAL/SHM, scratch and backup files are excluded from commits. Preparation only
+updates the phase6b Git branch; it does NOT check it out in production, push,
+change production DB, restart services or enable timers.
+
+After explicit approval, apply the reviewed branch BEFORE 96 so transition needs
+no operator action at 96. Recheck current HEAD, status, hashes, counts and unit
+account. If production has advanced/diverged, stop and review; never force/reset.
+Back up SQLite with its backup API, not a raw copy of a live WAL DB. Example:
 
 ```sh
 cd /opt/btc-predict
 git status --short --branch
 git rev-parse HEAD
-# After explicit approval and making the reviewed branch available locally:
 flock .next-stages.lock sh -eu -c '
-  .venv/bin/python -c '\''import sqlite3; src=sqlite3.connect("file:btc.db?mode=ro",uri=True); dst=sqlite3.connect("/tmp/btc-before-phase6b.db"); src.backup(dst); dst.close(); src.close()'\''
+  .venv/bin/python -c '\''import sqlite3; src=sqlite3.connect("file:btc.db?mode=ro",uri=True); dst=sqlite3.connect("/tmp/btc-before-phase6b-auto.db"); src.backup(dst); dst.close(); src.close()'\''
   git merge --ff-only phase6b
   .venv/bin/python -m unittest discover -q
 '
 .venv/bin/python phase6b.py status
-# Must show phase6_accepted=96. start also requires all96 evaluated.
-.venv/bin/python phase6b.py start > /tmp/phase6b-manifest.json
-.venv/bin/python phase6b.py status
-# Retain the SQLite backup, manifest, original Phase6 results and code commit.
-# Only with explicit authorization to install/enable the prepared timer:
 sudo install -m 0644 deploy/systemd/btc-phase6b.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/btc-phase6b.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now btc-phase6b.timer
+sudo systemctl restart btc-web.service
 systemctl list-timers --all btc-phase6b.timer
+curl --fail https://btc.kenic.jp/phase6b/data.json
+curl --fail https://btc.kenic.jp/phase6b/
 ```
 
-The new timer runs at hh:01:45 UTC, with the same ten-minute live deadline.
-`start` never makes provider calls. It records the next hourly target, so enabling
-at another time cannot backfill prior targets; the first eligible target is the
-next future boundary. Do not start the service manually to test it.
-The new service uses ubuntu, matching the inspected production account.
-No existing service/timer restart is necessary. Verify after the next boundary:
+No manual start or scheduler invocation is needed. Below96 the timer only waits.
+No existing collector, predictor or Phase 5b timer restart is needed; the web
+restart loads the read-only UI changes. Preserve the backup and code commit.
+After 96, verify the automatic start and first saved6b target:
 
 ```sh
 cd /opt/btc-predict
@@ -110,10 +122,11 @@ cd /opt/btc-predict
 journalctl -u btc-phase6b.service --since today --no-pager
 ```
 
-At cumulative200, wait until the last actual is evaluated, export/retain 6b
-results and status, then disable the 6b timer if desired (separate approval).
-Analyze primary96, additional104 and cumulative200 explicitly as distinct cohorts.
-No deployment/start/stop based on interim performance (no optional stopping).
-For a technical failure, preserve all rows; restore the committed frozen code
-before resuming. Never restore an old DB over live observations. The original
-Phase6 scheduler remains independent and bounded at96 throughout.
+The timer uses Persistent=false and the original ten-minute deadline: delays or
+outages do not cause retrospective predictions. The start boundary remains the
+hour after the 96th target, so missing scheduled hours remain visible. When
+cumulative 200 is reached, allow the last actual to complete, retain both cohorts
+and final manifests, then optionally disable only the 6b timer with authorization.
+For failure recovery preserve all rows; restore compatible committed code before
+resuming. Never restore an old DB over live observations or regenerate frozen
+config/hashes. No optional stopping based on interim performance.
