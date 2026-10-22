@@ -78,3 +78,17 @@ late/missed/expiry boundaries, concurrent claim idempotency, crash reservations,
 source DB immutability, canonical RV/missing candles, FLAT outcomes, common-target
 intersection, and repeat ties/incomplete sets. Real socket connections are blocked
 in the test run. No provider call, push, deploy or service action was performed.
+
+## Read-only dashboard follow-up
+
+`/phase6c/`, `/phase6c/data.json` and `/analyze/?phase=phase6c` expose
+accepted-target progress, primary forecasts, ten-repeat completion, modal
+direction/agreement, and stored outcomes. Complete ten-repeat ties and
+incomplete sets remain distinguishable. Comparison tables include common-target
+GPT/Logistic/Claude performance by cohort, primary/modal performance by repeat
+agreement, and GPT/Claude same/different performance with the latest 100 cases.
+
+The dashboard imports the unchanged frozen claude_analysis report; no gate,
+predictor, repeat, metric or stopping behavior is modified. Viewing a route
+does not fetch market/provider data or write either database. Progress remains
+visible if the original comparison database is missing or unavailable.

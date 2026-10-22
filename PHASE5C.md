@@ -133,3 +133,20 @@ Planned maximum calls: `H + 11*A`, where H is registered hourly slots and A is
 eligible accepted Phase 6 / 6b targets during that window. Actual calls may be
 lower due to missing input, deadline, outage or failures. Main direction is one
 request, repeats are **ten additional** requests. No token/cost estimate is claimed.
+
+## Read-only dashboard follow-up
+
+`/phase5c/`, `/phase5c/data.json` and `/analyze/?phase=phase5c` show the
+registered calendar window, progress including failures/missed targets, latest
+100 predictions, and paired GPT/Claude RV MAE, bias and correlations. Main
+navigation and analysis filters include Phase 5c and Phase 6c.
+
+`claude_views.py` uses read-only SQLite connections and public fields only.
+It never initializes experiments, calls providers or displays prompts/raw
+responses. Missing databases do not get created. Missing or busy source data
+leaves progress visible while comparisons are marked unavailable.
+
+This UI follow-up modifies only app.py/ui.py and documents, and adds
+claude_views.py/test_claude_views.py. None is in the frozen predictor source
+manifest. No observation reinitialization or timer restart is needed. Deploy
+the reviewed UI commit and restart only btc-web.service to load its routes.
