@@ -2,7 +2,7 @@
 
 ## Manifest
 
-- Version: `claude-side-v1`; preparation base: `75bd4990d90a2751d8b9841a535a9e9679f905bc`.
+- Version: `claude-side-v2-opus55`; preparation base: `75bd4990d90a2751d8b9841a535a9e9679f905bc`.
 - Start: next UTC hour after explicit `claude_observation.py init`.
 - End: **2026-11-02 00:00:00 UTC, exclusive**, confirmed by the operator.
   Last possible target is 2026-11-01 23:00 UTC. Requests and response eligibility
@@ -23,12 +23,12 @@
   use the unchanged `phase4_runner.build_snapshot` for continued all-hour coverage.
 - Input instruction is the exact literal from `next_stages.regression_call`;
   no added system prompt, tools, news, external facts or outcome data.
-- Claude: **`claude-sonnet-4-6`**, `temperature=1.0`, `max_tokens=1024`,
-  `thinking={"type":"disabled"}`; top_p/top_k omitted; one user message;
+- Claude: **`claude-opus-5-5`**, `max_tokens=4096`,
+  `thinking={"type":"adaptive"}`, `output_config={"effort":"medium"}`; temperature/top_p/top_k omitted; one user message;
   API version `2023-06-01`; endpoint `https://api.anthropic.com/v1/messages`.
   No retries or redirects. Timeout 120 seconds, capped by remaining live window.
-  This model was chosen to allow explicit temperature and disabled thinking.
-  Official model reference: https://platform.claude.com/docs/en/models/sonnet-4-6/overview
+  Adaptive thinking is always on for Opus 5.5; sampling controls are omitted as required.
+  Official model reference: https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
   API reference: https://platform.claude.com/docs/en/api/messages/create
 - GPT sampling/reasoning defaults remain untouched. Exact semantic inputs and
   instructions are matched; this does not claim identical provider internals,
@@ -150,3 +150,16 @@ This UI follow-up modifies only app.py/ui.py and documents, and adds
 claude_views.py/test_claude_views.py. None is in the frozen predictor source
 manifest. No observation reinitialization or timer restart is needed. Deploy
 the reviewed UI commit and restart only btc-web.service to load its routes.
+
+## Pre-observation model selection — 2026-10-22
+
+The operator selected Opus 5.5 before the first target. The prior Sonnet 4.6
+registration had zero RV rows, zero direction events and zero direction calls.
+The original start 2026-10-22 11:00 UTC and end 2026-11-02 00:00 UTC are retained.
+The superseded registration is backed up and stored in claude_config_history.
+Only the explicit refreeze-before-start action can replace that unused Sonnet
+registration; it rejects any observation rows, start-time passage, wrong old
+model/version or registration-integrity failure. No ongoing observations may be
+reconfigured. Adaptive thinking uses a 4096-token combined thinking/text limit,
+effort medium. Prompt and scoring remain unchanged; thinking blocks are skipped
+when parsing text and truncated responses remain invalid without retry.

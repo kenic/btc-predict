@@ -2,7 +2,7 @@
 
 ## Manifest
 
-Version `claude-side-v1`, same initialization, calendar boundary, provider settings,
+Version `claude-side-v2-opus55`, same initialization, calendar boundary, provider settings,
 frozen sources and deployment procedure as PHASE5C.md. No optional stopping.
 Independent calendar end is **2026-11-02 00:00:00 UTC exclusive**; it never extends
 Phase 6's N=96 or Phase 6b's cumulative N=200. Any earlier end of those populations
@@ -18,8 +18,8 @@ never submitted after target+600. Returning after the deadline is marked late.
 
 The exact GPT direction prompt is extracted from `phase6.direction_call`.
 The same single context replacement (RV heading → direction heading) is applied.
-Model settings: `claude-sonnet-4-6`, temperature 1.0, max_tokens 1024, thinking
-explicitly disabled, no tools/system prompt/retries. See PHASE5C.md for details.
+Model settings: `claude-opus-5-5`, temperature omitted, max_tokens 4096, thinking
+adaptive, output_config effort medium, no tools/system prompt/retries. See PHASE5C.md for details.
 
 ## Primary and repeats
 
@@ -92,3 +92,16 @@ The dashboard imports the unchanged frozen claude_analysis report; no gate,
 predictor, repeat, metric or stopping behavior is modified. Viewing a route
 does not fetch market/provider data or write either database. Progress remains
 visible if the original comparison database is missing or unavailable.
+
+## Pre-observation model selection — 2026-10-22
+
+The operator selected Opus 5.5 before the first target. The prior Sonnet 4.6
+registration had zero RV rows, zero direction events and zero direction calls.
+The original start 2026-10-22 11:00 UTC and end 2026-11-02 00:00 UTC are retained.
+The superseded registration is backed up and stored in claude_config_history.
+Only the explicit refreeze-before-start action can replace that unused Sonnet
+registration; it rejects any observation rows, start-time passage, wrong old
+model/version or registration-integrity failure. No ongoing observations may be
+reconfigured. Adaptive thinking uses a 4096-token combined thinking/text limit,
+effort medium. Prompt and scoring remain unchanged; thinking blocks are skipped
+when parsing text and truncated responses remain invalid without retry.

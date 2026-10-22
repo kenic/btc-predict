@@ -60,6 +60,36 @@ class ClaudeTests(unittest.TestCase):
         with self.assertRaises(ValueError): o.initialize(self.root/'expired.db',self.source,self.candles,clock=o.END)
         with self.assertRaises(ValueError): o.initialize(self.source,self.source,self.candles,clock=self.t)
 
+    def test_prestart_refreeze_preserves_boundary_audits_and_is_idempotent(self):
+        old=json.loads(self.state['config_json'])
+        old['version']='claude-side-v1'
+        old['params']={'model':'claude-sonnet-4-6','temperature':1,'max_tokens':1024,'thinking':{'type':'disabled'}}
+        frozen=json.dumps(old,sort_keys=True)
+        with o.db(self.side) as c:
+            c.execute('UPDATE claude_config SET config_json=?,config_hash=?',(frozen,o.digest(frozen)))
+        first=o.refreeze_before_start(self.side,self.source,self.candles,clock=self.t-1)
+        self.assertEqual(first['start_target'],self.state['start_target'])
+        self.assertEqual(first['end_exclusive'],self.state['end_exclusive'])
+        self.assertEqual(json.loads(first['config_json'])['params']['model'],'claude-opus-5-5')
+        self.assertEqual(o.refreeze_before_start(self.side,self.source,self.candles,clock=self.t-1),first)
+        with o.db(self.side) as c:
+            history=c.execute('SELECT * FROM claude_config_history').fetchall()
+            self.assertEqual(len(history),1)
+            self.assertEqual(json.loads(history[0]['old_registration_json'])['config_json'],frozen)
+        with self.assertRaises(RuntimeError):
+            o.refreeze_before_start(self.side,self.source,self.candles,clock=self.t)
+        with o.db(self.side) as c:
+            c.execute("INSERT INTO phase5c_predictions(target,status,started_at) VALUES(?,'started','now')",(self.t,))
+        with self.assertRaises(RuntimeError):
+            o.refreeze_before_start(self.side,self.source,self.candles,clock=self.t-1)
+
+    def test_thinking_blocks_are_ignored_and_truncation_rejected(self):
+        raw=self.response('direction','',{},1)
+        raw['content'].insert(0,{'type':'thinking','thinking':'','signature':'mock'})
+        self.assertEqual(o.parse('direction',raw)['direction'],'UP')
+        raw['stop_reason']='max_tokens'
+        with self.assertRaises(ValueError): o.parse('direction',raw)
+
     def test_primary_ten_repeats_exact_snapshot_idempotent_source_unchanged(self):
         self.seed()
         before=self.source.read_bytes()
@@ -159,7 +189,10 @@ class ClaudeTests(unittest.TestCase):
             request=opener.return_value.open.call_args.args[0]
             payload=json.loads(request.data)
             self.assertEqual(payload['model'],o.MODEL)
-            self.assertEqual(payload['temperature'],1)
+            self.assertNotIn('temperature',payload)
+            self.assertEqual(payload['thinking'],{'type':'adaptive'})
+            self.assertEqual(payload['output_config'],{'effort':'medium'})
+            self.assertEqual(payload['max_tokens'],4096)
             self.assertEqual(payload['messages'][0]['content'],o.request_text('rv',self.ctx,o.spec()))
             self.assertNotIn('test-secret',json.dumps(raw))
             opener.return_value.open.assert_called_once()

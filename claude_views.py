@@ -28,7 +28,8 @@ def report(source_path, section='phase5c', *, clock=None):
             if config is None:
                 return dict(status='awaiting_init', message='Claude observation has not been initialized.')
             cfg = json.loads(config['config_json'])
-            params = {key: cfg['params'][key] for key in ('model', 'temperature', 'max_tokens')}
+            params = cfg['params']
+            model, max_tokens = params['model'], params['max_tokens']
             # Public fields only: never expose input context, prompt, raw response or DB paths.
             rv = [dict(r) for r in c.execute('''SELECT target,status,previous_rv,predicted_rv,actual_rv,
                 evaluated_at,model_version,error FROM phase5c_predictions ORDER BY target''')]
@@ -81,8 +82,9 @@ def report(source_path, section='phase5c', *, clock=None):
                  else 'recovering_actuals' if pending or direction_pending else 'window_closed')
     return dict(status='ready', section=section, lifecycle=lifecycle,
         start_target=config['start_target'], end_exclusive=config['end_exclusive'],
-        model=params['model'], temperature=params['temperature'],
-        max_tokens=params['max_tokens'],
+        model=model, temperature=params.get('temperature'),
+        thinking=params.get('thinking', {}).get('type'), effort=params.get('output_config', {}).get('effort'),
+        max_tokens=max_tokens,
         planned=(config['end_exclusive']-config['start_target'])//3600,
         recorded=len(rv), rv_counts=dict(Counter(r['status'] for r in rv)),
         actuals_available=len(rv)-pending, actuals_pending=pending,
@@ -134,7 +136,9 @@ def page(source_path, section='phase5c', analysis=False):
     content += card('Observation window', metric_blocks([
         ('Status', lifecycle[data['lifecycle']]), ('First target', utc(data['start_target'])),
         ('New prediction end (exclusive)', utc(data['end_exclusive'])), ('Model', data['model']),
-        ('Temperature', data['temperature']), ('Max output tokens', data['max_tokens'])]))
+        ('Temperature', data['temperature'] if data['temperature'] is not None else 'Provider default'),
+        ('Thinking / effort', f"{data['thinking'] or 'Default'} / {data['effort'] or 'Default'}"),
+        ('Max output tokens', data['max_tokens'])]))
     if section == 'phase5c':
         counts = data['rv_counts']
         content += card('Hourly observation progress', metric_blocks([

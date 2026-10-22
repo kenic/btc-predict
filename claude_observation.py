@@ -19,8 +19,9 @@ import urllib.request
 ROOT = Path(__file__).resolve().parent
 END = int(datetime(2026, 11, 2, tzinfo=timezone.utc).timestamp())
 DEADLINE = 600
-MODEL = 'claude-sonnet-4-6'
-PARAMS = dict(model=MODEL, temperature=1.0, max_tokens=1024, thinking={'type': 'disabled'})
+MODEL = 'claude-opus-5-5'
+PARAMS = dict(model=MODEL, max_tokens=4096, thinking={'type': 'adaptive'},
+              output_config={'effort': 'medium'})
 SOURCES = ('claude_observation.py', 'claude_analysis.py', 'phase5b.py', 'phase6.py',
            'phase6b.py', 'phase6b_runtime.py', 'phase6_methods.py', 'phase4_runner.py',
            'next_stages.py', 'phase4.py', 'volatility.py', 'predict_gpt.py',
@@ -57,7 +58,7 @@ def prompt_literal(filename, function):
 
 
 def spec():
-    return dict(version='claude-side-v1', params=PARAMS, api_version='2023-06-01',
+    return dict(version='claude-side-v2-opus55', params=PARAMS, api_version='2023-06-01',
                 endpoint='https://api.anthropic.com/v1/messages', timeout=120, retries=0,
                 prompts={'rv': prompt_literal('next_stages.py', 'regression_call'),
                          'direction': prompt_literal('phase6.py', 'direction_call')},
@@ -117,6 +118,44 @@ def initialize(path, source, candles, clock=None):
                   (stamp(), start, END, config, digest(config), sha,
                    str(Path(source).resolve()), str(Path(candles).resolve())))
         return dict(c.execute('SELECT * FROM claude_config').fetchone())
+
+
+def refreeze_before_start(path, source, candles, clock=None):
+    """Explicit authorized model change, only before the first target with zero rows."""
+    clock = time.time() if clock is None else clock
+    with db(path) as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT * FROM claude_config WHERE singleton=1').fetchone()
+        if row is None:
+            raise RuntimeError('Existing registration required')
+        old = dict(row)
+        if (clock >= old['start_target'] or old['end_exclusive'] != END or
+                old['source_db'] != str(Path(source).resolve()) or
+                old['candles_db'] != str(Path(candles).resolve()) or
+                digest(old['config_json']) != old['config_hash']):
+            raise RuntimeError('Pre-observation registration boundary/integrity check failed')
+        for table in ('phase5c_predictions', 'phase6c_events', 'phase6c_calls'):
+            if c.execute('SELECT count(*) FROM '+table).fetchone()[0]:
+                raise RuntimeError('Observation rows exist; cannot replace registration')
+        if json.loads(old['config_json']) == spec():
+            check(row, source, candles)
+            return old
+        previous = json.loads(old['config_json'])
+        if previous.get('params', {}).get('model') != 'claude-sonnet-4-6' or previous.get('version') != 'claude-side-v1':
+            raise RuntimeError('Only the unused initial Sonnet registration may be replaced')
+        config = json.dumps(spec(), sort_keys=True)
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        c.execute('''CREATE TABLE IF NOT EXISTS claude_config_history (
+            id INTEGER PRIMARY KEY, replaced_at TEXT NOT NULL, reason TEXT NOT NULL,
+            old_registration_json TEXT NOT NULL, new_config_hash TEXT NOT NULL)''')
+        c.execute('INSERT INTO claude_config_history(replaced_at,reason,old_registration_json,new_config_hash) VALUES(?,?,?,?)',
+                  (stamp(), 'User-authorized Opus 5.5 selection before first target; zero observation rows',
+                   json.dumps(old, sort_keys=True), digest(config)))
+        c.execute('UPDATE claude_config SET started_at=?,config_json=?,config_hash=?,code_sha=? WHERE singleton=1',
+                  (stamp(), config, digest(config), sha))
+        result = c.execute('SELECT * FROM claude_config WHERE singleton=1').fetchone()
+        check(result, source, candles)
+        return dict(result)
 
 
 def check(row, source, candles):
@@ -336,13 +375,15 @@ def cycle(path, source, candles, clock_fn=time.time, call=provider, builder=None
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action', choices=('init', 'cycle', 'status'))
+    p.add_argument('action', choices=('init', 'refreeze-before-start', 'cycle', 'status'))
     p.add_argument('--db', type=Path, default=ROOT/'claude-observation.db')
     p.add_argument('--source-db', type=Path, default=ROOT/'btc.db')
     p.add_argument('--candles-db', type=Path, default=ROOT/'candles.db')
     a = p.parse_args()
     if a.action == 'init':
         print(json.dumps(initialize(a.db, a.source_db, a.candles_db), indent=2))
+    elif a.action == 'refreeze-before-start':
+        print(json.dumps(refreeze_before_start(a.db, a.source_db, a.candles_db), indent=2))
     elif a.action == 'cycle':
         cycle(a.db, a.source_db, a.candles_db)
     else:

@@ -90,7 +90,7 @@ class ClaudeViewTests(unittest.TestCase):
                     self.assertEqual(response.status_code,200)
                     text=response.get_data(as_text=True)
                     self.assertIn(f'href="{active}" aria-current="page"',text)
-                    self.assertIn('claude-sonnet-4-6',text)
+                    self.assertIn('claude-opus-5-5',text)
                     self.assertNotIn('private raw',text)
                     self.assertNotIn('private context',text)
                     self.assertNotIn('<unsafe>',text)
