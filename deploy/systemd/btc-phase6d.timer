@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe Claude independent ACTIVE gate on each hourly target
+
+[Timer]
+OnCalendar=*-*-* *:*:45 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=btc-phase6d.service
+
+[Install]
+WantedBy=timers.target

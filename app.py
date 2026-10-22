@@ -1171,6 +1171,9 @@ def analysis_bar(stats):
 
 @app.route("/analyze/")
 def analyze():
+    if request.args.get("phase") == "phase6d":
+        from phase6d_views import page
+        return page(DB_PATH, analysis=True)
     if request.args.get("phase") in ("phase5c", "phase6c"):
         from claude_views import page
         return page(DB_PATH, section=request.args["phase"], analysis=True)
@@ -1322,6 +1325,16 @@ def phase6c_dashboard():
 def phase6c_data():
     from claude_views import report
     return report(DB_PATH, section='phase6c')
+
+@app.route("/phase6d/")
+def phase6d_dashboard():
+    from phase6d_views import page
+    return page(DB_PATH)
+
+@app.route("/phase6d/data.json")
+def phase6d_data():
+    from phase6d_views import report
+    return report(DB_PATH)
 
 @app.after_request
 def read_only_page_cache(response):
