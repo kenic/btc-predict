@@ -1,0 +1,20 @@
+[Unit]
+Description=Independent Claude Phase 5c and 6c side observations
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/btc-predict
+EnvironmentFile=/etc/btc-predict/claude.env
+ExecStart=/opt/btc-predict/.venv/bin/python /opt/btc-predict/claude_observation.py cycle
+TimeoutStartSec=600
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict
+ReadOnlyPaths=/opt/btc-predict/btc.db /opt/btc-predict/candles.db
