@@ -1,0 +1,18 @@
+[Unit]
+Description=BTC Phase7 frozen selector prospective paper observation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/btc-predict
+ExecStart=/opt/btc-predict/.venv/bin/python /opt/btc-predict/phase7.py cycle
+TimeoutStartSec=540
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict

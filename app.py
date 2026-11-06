@@ -1343,6 +1343,17 @@ def read_only_page_cache(response):
     return response
 
 
+@app.route('/phase7/')
+def phase7_page():
+    from phase7_report import render
+    return render(DB_PATH.parent/'phase7.db')
+
+@app.route('/phase7/data.json')
+def phase7_data():
+    from phase7_report import report
+    return report(DB_PATH.parent/'phase7.db')
+
+
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
