@@ -35,4 +35,11 @@ class VolatilityViewTests(unittest.TestCase):
     def test_no_events_never_opens_sources(self):
         with patch('phase7_views.frozen_report',return_value={'recent':[]}),patch('phase7_views.sqlite3.connect',side_effect=AssertionError('No database access expected')):
             self.assertEqual(report('/absent'),{'recent':[]})
+    def test_scheduled_render_has_new_headings(self):
+        from phase7_views import render
+        data=dict(status='Scheduled',start_target=3600,end_exclusive=7200,recorded_hours=0,accepted=0,executable_n=0,missing_hours=0,training={'selector':{},'logistic_n':757},methods={'gpt':{'n':0,'trades':0,'mean_net_bps':None,'max_drawdown_bps':0}},primary={'verdict':'Not tested'},recent=[])
+        with patch('phase7_views.report',return_value=data):
+            page=render('/absent')
+        for title in ('Volatility forecast','Actual volatility','Actual RV (%)'):
+            self.assertIn(title,page)
 if __name__=='__main__':unittest.main()
