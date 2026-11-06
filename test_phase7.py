@@ -127,4 +127,17 @@ class Phase7Tests(unittest.TestCase):
             self.assertEqual(client.get('/phase7/data.json').json['status'],'Not armed')
             self.assertFalse((Path(d)/'phase7.db').exists())
 
+    def test_window_and_code_hash_tampering_fails_closed(self):
+        from phase4 import config_hash
+        a=dict(source_hashes={'x':'one'},dependencies={'numpy':'one'},days=60)
+        f=dict(fit_cutoff=120)
+        state=dict(arm_json=json.dumps(a),arm_hash=config_hash(a),frozen_json=json.dumps(f),frozen_hash=config_hash(f),start_target=3600,end_exclusive=3600+60*86400)
+        with patch('phase7.hashes',return_value={'x':'one'}),patch('phase7.dependencies',return_value={'numpy':'one'}):
+            phase7.validate(state)
+            state['end_exclusive']+=3600
+            with self.assertRaises(RuntimeError):phase7.validate(state)
+        state['end_exclusive']-=3600
+        with patch('phase7.hashes',return_value={'x':'two'}),patch('phase7.dependencies',return_value={'numpy':'one'}):
+            with self.assertRaises(RuntimeError):phase7.validate(state)
+
 if __name__=='__main__':unittest.main()

@@ -93,8 +93,13 @@ def validate(state):
     a=json.loads(state['arm_json'])
     if config_hash(a)!=state['arm_hash'] or a['source_hashes']!=hashes() or a['dependencies']!=dependencies():
         raise RuntimeError('Frozen code/config/dependencies changed')
-    if state['frozen_json'] and config_hash(json.loads(state['frozen_json']))!=state['frozen_hash']:
-        raise RuntimeError('Frozen model hash mismatch')
+    if state['frozen_json']:
+        f=json.loads(state['frozen_json'])
+        if config_hash(f)!=state['frozen_hash']:
+            raise RuntimeError('Frozen model hash mismatch')
+        expected_start=(int(f['fit_cutoff'])//3600+1)*3600
+        if state['start_target']!=expected_start or state['end_exclusive']!=expected_start+a['days']*86400:
+            raise RuntimeError('Frozen observation window changed')
     return a
 
 def first_quote(c,at,max_delay=15):
