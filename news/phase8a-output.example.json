@@ -1,0 +1,15 @@
+{
+  "schema_version": "phase8a.prediction.v1",
+  "engine": "gpt6_astra",
+  "run_id": "example-only-no-model-invoked",
+  "as_of": 1794358800,
+  "horizon_seconds": 14400,
+  "target": "BTC-USD",
+  "input_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "news_versions": [],
+  "status": "abstain",
+  "prediction": null,
+  "reasoning": "Illustrative contract example; no forecast has been generated.",
+  "evidence": [],
+  "uncertainties": ["Input hash is an example placeholder, not an actual snapshot digest."]
+}

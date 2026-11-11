@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect English RSS every fifteen minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=btc-news.service
+
+[Install]
+WantedBy=timers.target

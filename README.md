@@ -53,3 +53,10 @@ six-candle short-gap recovery and no interpolation/historical automatic backfill
 Phase 6 actual RV uses the archive through the unchanged Phase 4 canonical helper.
 See [CANDLE_COLLECTOR.md](CANDLE_COLLECTOR.md) for schema, timing, tests and the
 operator-installed systemd service/timer. Older missing hours remain unavailable.
+
+## Phase 8pre: English news archive
+
+Independent RSS ingestion, versioned SQLite provenance, point-in-time 24h JSON
+snapshots and polling health reports. No model calls or changes to Phase 1–6.
+See [PHASE8PRE.md](PHASE8PRE.md) for setup, source permissions, query semantics,
+tests, operational limits and the Phase 8a common output contract.
