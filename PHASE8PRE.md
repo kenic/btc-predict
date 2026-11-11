@@ -14,7 +14,10 @@ Phase 5b/6b/6d/7, Claude observation and candle timers. Production main is
 work. Those commits were fetched without modifying the server and are retained
 in a separate compatibility-validation checkout. Existing untracked production
 plots and candle WAL/SHM files are left alone. No applicable AGENTS.md was found.
-No production installation, restart, migration or prediction call was performed.
+With the user's explicit approval, a separate `/opt/btc-news` deployment and
+dedicated `btc-news.service`/`btc-news.timer` were installed on 2026-11-11 JST.
+The original `/opt/btc-predict` checkout, databases and services remain untouched;
+no existing service restart, migration or prediction call was performed.
 
 New code needs only Python **3.9+ standard library** on Linux/macOS. In particular
 it does not import Flask, pandas, OpenAI, TypeSafe, experiment runners or `.env`.
@@ -176,9 +179,10 @@ first acquisition time. Sparse monthly feeds need not publish every 24 hours.
 
 ## Linux deployment and rollback
 
-The following is an operator recipe, not a claim that this task enabled
-production collection. The template uses the observed `ubuntu:ubuntu` account.
-Confirm branch, account,
+Production collection is now enabled in the independent directory described below.
+The following alternative recipe shows installation beside a reviewed repository
+checkout. Do not install a second copy over the active deployment. The template
+uses the observed `ubuntu:ubuntu` account. Confirm branch, account,
 paths and local changes before installing. Leave all existing timers alone.
 
 ```sh
@@ -242,6 +246,46 @@ evidence references must be a subset. `ok` requires a prediction; `abstain` and
 No engine SDK, API request, forecast scheduling or existing experiment mutation
 is introduced here.
 
+## Verified standalone production deployment
+
+On 2026-11-11 JST, the user explicitly authorized live collection. Installed only
+new files under `/opt/btc-news`, owned by `ubuntu`, with config mode 0600 and
+directory mode 0750. The deployed service renders the repository template with:
+
+```ini
+WorkingDirectory=/opt/btc-news
+ExecStart=/usr/bin/python3 -m news.cli --db /opt/btc-news/news.db collect --config /opt/btc-news/news.config.json
+ReadWritePaths=/opt/btc-news
+```
+
+It uses system Python 3.12.3 and standard library only. No existing environment
+was changed. The code source commit is
+`d229f5e9557c43efd40558f72b32cbbb2769ed32`; `SOURCE_COMMIT` and
+`source-manifest.json` retain its per-file hashes. Later documentation commits do
+not change that deployed code. Active units are `/etc/systemd/system/btc-news.*`.
+The fifteen-minute UTC timer is enabled, and initial service Result is success,
+ExecMainStatus 0. CoinDesk remains blocked. The initial FRB/BLS run stored 56
+articles; repeated collection returned 304 for all four feeds without adding
+versions. Past-cutoff snapshot equality is checked across the repeated collection.
+The original production checkout remains at `d5dca83` with its preexisting
+untracked plots/WAL files and no tracked edits. Existing web/candle/Phase 7
+services were rechecked as active.
+
+Inspect the active deployment directly:
+
+```sh
+cd /opt/btc-news
+/usr/bin/python3 -m news.cli --db news.db health --format text
+/usr/bin/python3 -m news.cli --db news.db snapshot --as-of '2026-11-11T18:00:00+09:00'
+systemctl list-timers btc-news.timer
+journalctl -u btc-news.service -n 50 --no-pager
+```
+
+Choose a cutoff that has already occurred. No web route was added; CLI JSON and
+the terminal health table provide collection/query visibility independently.
+Rollback remains `sudo systemctl disable --now btc-news.timer`; retain the DB.
+Do not modify the archived version timestamps or delete the collection history.
+
 ## Validation / completion checklist
 
 - Implemented: isolated collection/storage, 15-minute timer (10-minute option),
@@ -254,9 +298,17 @@ is introduced here.
   GUID/URL, ambiguous duplicates, Retry-After restart, feed failure isolation,
   CoinDesk policy blocking, malformed XML, lock/interruption, clock regression,
   read-only queries and preservation of foreign/experiment DB bytes.
+- Results: 31 new standard-library tests pass; GitHub main plus this change passes
+  112 tests locally on Python 3.9.6. The actual production `d5dca83` code plus this
+  change passes all 209 tests on the server's Python 3.12.3 in an isolated Git
+  clone. JSON Schema/four engine examples and Linux systemd units/calendar pass.
+  An initial archive-only test copy lacked Git metadata and caused 44 existing
+  registration tests to fail; rerunning in a proper isolated clone resolved all
+  failures. Existing static-file ResourceWarnings remain non-failing. The pinned
+  production dependency set was used for the Linux run; local tests used available
+  compatible dependencies because not all pinned packages exist on the local index.
 - Live FRB/BLS collection is explicitly permitted by configured policy; CoinDesk
   and actual prediction calls are excluded. See the accompanying verification
   report for actual test counts, live responses and environment limitations.
-- Pending external conditions: CoinDesk written permission and production service
-  installation/activation. Future CryptoPanic/GDELT adapters and
+- Pending external condition: CoinDesk written permission. Future CryptoPanic/GDELT adapters and
   Phase 8a model calls are intentionally outside this implementation.
