@@ -22,3 +22,7 @@ direction_history_5m.json
 direction_history_5m.tmp
 
 scratch/
+news.config.json
+*.collector.lock
+news.db-wal
+news.db-shm

@@ -1,0 +1,21 @@
+[Unit]
+Description=Phase 8pre independent English RSS archive
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Confirm the existing checkout owner; use an unprivileged account.
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-predict
+ExecStart=/opt/btc-predict/.venv/bin/python -m news.cli --db /opt/btc-predict/news.db collect --config /opt/btc-predict/news.config.json
+TimeoutStartSec=360
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/btc-predict
+StandardOutput=journal
+StandardError=journal
