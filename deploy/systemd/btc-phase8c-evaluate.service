@@ -1,0 +1,18 @@
+[Unit]
+Description=Phase 8c -evaluate (paper only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-phase8c
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8c.scheduled evaluate --schedule /opt/btc-phase8c/phase8c.schedule.json
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/btc-phase8c/outputs

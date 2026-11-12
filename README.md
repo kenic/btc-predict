@@ -83,3 +83,8 @@ The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset foreca
 5銘柄・4エンジンの毎時予測と4時間後の答え合わせを比較できます。
 8aはニュースのみを維持。8bは予測時点までに取得済みの5分足から指標を追加します。
 構成・指標定義・運用・停止手順は [PHASE8B.md](PHASE8B.md) を参照してください。
+
+### Phase 8c
+
+See [Phase 8c operation and comparison contract](PHASE8C.md).
+Hourly 4h forecasts with multi-timeframe indicators, orderbook, trade flow and news; /phase8c/ compares 8a, 8b and 8c.

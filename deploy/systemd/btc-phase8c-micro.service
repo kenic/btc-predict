@@ -1,0 +1,22 @@
+[Unit]
+Description=Phase 8c public order book and supplemental trade archive
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-phase8c
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8c.micro --db /opt/btc-phase8c/data/micro.sqlite3
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/btc-phase8c/data
+
+[Install]
+WantedBy=multi-user.target

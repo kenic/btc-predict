@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "allow_unpriced_kairos": false,
+  "interval_seconds": 3600,
+  "start_cutoff": 1794456000,
+  "known_daily_budget_usd": 100,
+  "known_30day_budget_usd": 3000,
+  "max_daily_calls": 480,
+  "max_30day_calls": 14400,
+  "config": "/opt/btc-phase8c/phase8c.config.json",
+  "news_db": "/opt/btc-phase8a/inputs/news.db",
+  "btc_candles_db": "/opt/btc-phase8a/inputs/candles.db",
+  "directory": "/opt/btc-phase8c/outputs/hourly-v1",
+  "additional_batches": [],
+  "baseline_root": "/opt/btc-phase8a/outputs/hourly-20261112",
+  "technical_db": "/opt/btc-phase8c/data/technical.sqlite3"
+}

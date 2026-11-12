@@ -1,0 +1,11 @@
+[Unit]
+Description=Phase 8c hourly prediction
+
+[Timer]
+OnCalendar=*-*-* *:00:45 UTC
+AccuracySec=1s
+Persistent=false
+Unit=btc-phase8c.service
+
+[Install]
+WantedBy=timers.target
