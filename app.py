@@ -1376,6 +1376,20 @@ def phase8pre_dashboard():
     return render(data, historical=bool(request.args.get('as_of'))), status
 
 
+PHASE8A_WEB_ROOT = Path('/opt/btc-phase8a/outputs/hourly-20261112')
+
+@app.route('/phase8a/')
+@app.route('/phase8a/data.json')
+def phase8a_dashboard():
+    from phase8a_views import report, render
+    try:
+        data = report(PHASE8A_WEB_ROOT, request.args.get('symbol', 'BTC-USD'), request.args.get('cutoff'))
+    except ValueError:
+        return {'status': 'invalid_request', 'message': '銘柄または予測時刻を確認してください。'}, 400
+    status = 200 if data['status'] == 'ok' else 503
+    return (data if request.path.endswith('.json') else render(data)), status
+
+
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",

@@ -61,3 +61,7 @@ health, polling coverage and the news known at a chosen cutoff. CoinDesk RSS,
 FRB and BLS headlines are displayed with acquisition history and source attribution.
 See [NEWS_DASHBOARD.md](NEWS_DASHBOARD.md) for query semantics, permissions,
 testing, the independent news DB, deployment and rollback.
+
+## Phase 8a dashboard
+
+The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset forecasts, four-hour outcomes, metrics and execution history. See [PHASE8A-WEB.md](PHASE8A-WEB.md) for public-field restrictions and deployment.
