@@ -55,7 +55,7 @@ def reserve(path, cutoff, now, ceiling, policy, directory):
             return False
         latest=c.execute('SELECT max(reserved_at) FROM batches').fetchone()[0]
         if latest is not None and now < latest:raise ValueError('clock_regression')
-        total=c.execute('SELECT coalesce(sum(known_reserved_usd),0),coalesce(sum(calls),0) FROM batches WHERE reserved_at>?',(now-30*86400,)).fetchone()
+        total=c.execute('SELECT coalesce(sum(known_reserved_usd),0),coalesce(sum(calls),0) FROM batches WHERE cutoff>?',(cutoff-30*86400,)).fetchone()
         daily=c.execute('SELECT coalesce(sum(known_reserved_usd),0),coalesce(sum(calls),0) FROM batches WHERE reserved_at>=?',
                         (int(now)//86400*86400,)).fetchone()
         if (total[0]+ceiling > policy['known_30day_budget_usd'] or daily[0]+ceiling > policy['known_daily_budget_usd']

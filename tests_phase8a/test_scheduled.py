@@ -46,6 +46,12 @@ class ScheduledTests(Phase8aTests):
         with self.assertRaises(ValueError):scheduled.reserve(path,T+172800,T+172810,.8,p,self.path/'four')
         self.assertTrue(scheduled.reserve(path,T+31*86400,T+31*86400+11,.8,p,self.path/'later'))
 
+    def test_rolling_limit_uses_cutoffs_not_dispatch_jitter(self):
+        p=self.policy();path=self.path/'jitter.sqlite3'
+        p.update(max_30day_calls=20)
+        scheduled.reserve(path,T,T+20,.8,p,self.path/'old')
+        self.assertTrue(scheduled.reserve(path,T+30*86400,T+30*86400+10,.8,p,self.path/'new'))
+
     def test_empty_news_skips_without_retry_or_charge(self):
         p=self.policy();call=Mock()
         self.assertEqual(scheduled.predict(p,lambda:T+10,call)['status'],'preflight_skipped')
