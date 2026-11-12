@@ -173,7 +173,7 @@ Accuracy、Brier、LogLoss（0/1確率のlogのみ1e-15でclip）を算出。
 
 ## 定期実行の準備と運用
 
-本タスクでは本番配備、既存timer変更、有料テスト、定期予測開始は行わない。
+本番には独立配置する。既存timer変更、有料テスト、定期予測開始は行わない。
 `deploy/systemd/btc-phase8a.*` は別ディレクトリ `/opt/btc-phase8a` 用の準備済みテンプレート。
 本番の凍結済みcheckoutへ上書きするより、独立配備を推奨する。
 既存Python環境を利用し、ニュースDB・価格DBは読み取り専用、新規DBだけ書き込む。
@@ -226,4 +226,13 @@ WAL整合性を保って退避する。既存btc-web/candles/Phase 6/6b/7/news�
 - APIキーの読み出し/追加、有料推論、実取引、本番コード配備、既存設定変更は0件。
 
 `outputs/` にテストログ、ソースhash、offlineデモレポート、検証サマリーを保存。
-未commitの実装は作業ブランチ `phase8a-news-comparison` にあり、push/PRは行っていない。
+実装ブランチは `phase8a-news-comparison`。追加指示によりコミット・GitHub push・独立本番配置を行う。
+PR作成・main統合は対象外。
+
+## API設定待ちの本番配置
+
+配置先は `/opt/btc-phase8a`。`SOURCE_COMMIT`と`source-manifest.json`で配置物を識別する。
+`phase8a.config.json`は`live_enabled=false`。`.env.phase8a`は空欄テンプレート、mode 0600。
+定期実行unitはテンプレートのみ配置し、systemdへのインストール・enable・startは行わない。
+確認はcheckと実ニュースのoffline予行のみ。本番予測DBはまだ作成しない。
+既存 `/opt/btc-predict` と `/opt/btc-news` のコード・設定・タイマーは変更しない。
