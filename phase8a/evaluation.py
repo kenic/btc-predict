@@ -10,7 +10,10 @@ from . import store
 from .core import ENGINES, canonical
 
 
-def prices(path, cutoff, horizon, now):
+def prices(path, cutoff, horizon, now, symbol='BTC-USD'):
+    if symbol != 'BTC-USD':
+        from .market import prices as asset_prices
+        return asset_prices(path, symbol, cutoff, horizon, now)
     if now < cutoff+horizon+60:
         return None
     starts = (cutoff-300, cutoff+300, cutoff+horizon-300)
@@ -42,7 +45,7 @@ def evaluate(db, candle_db, clock=time.time):
         pending = c.execute('SELECT cutoff FROM cohorts WHERE cutoff NOT IN (SELECT cutoff FROM outcomes)').fetchall()
     saved = unavailable = 0
     for row in pending:
-        data = prices(candle_db, row[0], config['horizon_seconds'], now)
+        data = prices(candle_db, row[0], config['horizon_seconds'], now, config['symbol'])
         if data is None:
             unavailable += 1
             continue
@@ -112,6 +115,7 @@ def report(db):
                       'skip_rate': 1-trades/opportunities if opportunities else None,
                       'pnl_after_trading_cost_usd': pnl, 'api_reserved_upper_estimate_usd': conservative_cost,
                       'pnl_after_trading_and_all_reserved_api_cost_usd': pnl-conservative_cost,
-                      'api_cost_basis': 'conservative reservation, not settled invoice',
+                      'api_cost_basis': 'accounting reservation; NOT a price cap for unpriced calls',
+                      'unknown_cost_calls': sum(results[t, engine].get('cost_kind') == 'unknown' for t in targets),
                       'pending_outcomes': len(targets)-len(outcomes)}}
     return output

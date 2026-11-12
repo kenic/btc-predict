@@ -31,7 +31,8 @@
     "request_hash",
     "request_json",
     "kairos_profile",
-    "status"
+    "status",
+    "symbol"
   ],
   "additionalProperties": false,
   "properties": {
@@ -155,6 +156,15 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "symbol": {
+      "enum": [
+        "BTC-USD",
+        "ETH-USD",
+        "SOL-USD",
+        "XRP-USD",
+        "LINK-USD"
       ]
     }
   },

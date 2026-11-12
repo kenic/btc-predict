@@ -231,7 +231,7 @@ class Phase8aTests(unittest.TestCase):
             self.assertTrue(any(r[0] == 'late' and json.loads(r[1])['raw'] for r in rows))
 
     def test_wrong_profile_other_symbols_and_bad_numbers(self):
-        for key, value in (('kairos_profile', 'news_return'), ('symbol', 'ETH-USD'),
+        for key, value in (('kairos_profile', 'news_return'), ('symbol', 'DOGE-USD'),
                            ('daily_budget_usd', float('nan')), ('max_calls', True)):
             c = copy.deepcopy(self.c)
             c[key] = value
@@ -334,7 +334,7 @@ class Phase8aTests(unittest.TestCase):
 
     def test_nonoverlap_fixed_anchor_and_paper_costs(self):
         for t in (T, T+3600):
-            self.ingest(available=t-10, published=t-120, title='News '+str(t), guid=str(t), url='https://example.org/'+str(t))
+            self.ingest(available=t-10, published=t-120, title='Economic news '+str(t), guid=str(t), url='https://example.org/'+str(t))
             self.run_cutoff(t)
             self.candles_for(t)
         evaluation.evaluate(self.db, self.candles, lambda: T+20000)

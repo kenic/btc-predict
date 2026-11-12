@@ -57,7 +57,9 @@ operator-installed systemd service/timer. Older missing hours remain unavailable
 ## Phase 8a: common-news four-engine comparison
 
 See [PHASE8A.md](PHASE8A.md) for the current audit, offline demo, API setup,
-frozen evaluation contract and deployment procedure. The pilot is BTC-USD only,
+frozen evaluation contract and deployment procedure. The manual pilot supports BTC, ETH, SOL, XRP and LINK (USD pairs),
 paper only, and paid calls are disabled by default. Keys are supplied separately.
 Phase 8pre collection and its remaining coverage limits are described in
 [PHASE8PRE.md](PHASE8PRE.md).
+
+Manual real-news five-asset test and follow-up evaluation: [PHASE8A-MULTIASSET.md](PHASE8A-MULTIASSET.md). No prediction schedule is enabled.

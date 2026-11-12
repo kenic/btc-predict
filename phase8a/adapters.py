@@ -77,8 +77,8 @@ def request(engine, state, config):
     if engine == 'gpt6_astra':
         return {'model': model, 'instructions': instruction, 'input': canonical(state),
                 'max_output_tokens': config['max_output_tokens'], 'reasoning': {'effort': 'low'},
-                'store': False}
-    return {'model': model, 'system': instruction,
+                'store': False, 'service_tier': 'default'}
+    return {'model': model, 'system': instruction, 'service_tier': 'standard_only',
             'messages': [{'role': 'user', 'content': canonical(state)}],
             'max_tokens': config['max_output_tokens'], 'output_config': {'effort': 'low'}}
 
@@ -128,13 +128,20 @@ def cost(raw, engine_config):
         return None
 
 
-def preflight(config, state):
+def preflight(config, state, *, allow_unpriced_kairos=False):
     if not config['live_enabled']:
         raise ProviderError('live_disabled')
     for engine, settings in config['engines'].items():
         if not os.environ.get(KEYS[engine]):
             raise ProviderError('missing_' + KEYS[engine])
-        if not settings['account_verified'] or not settings['pricing_verified']:
+        if not settings['account_verified']:
+            raise ProviderError('account_unverified_' + engine)
+        bound = len(canonical(request(engine, state, config)).encode()) + 512
+        if engine == 'kairos' and bound > 4096:
+            raise ProviderError('kairos_pilot_context_limit')
+        if engine == 'kairos' and allow_unpriced_kairos:
+            continue
+        if not settings['pricing_verified']:
             raise ProviderError('account_or_pricing_unverified_' + engine)
         if any(settings[k] is None for k in ('input_per_million_usd', 'output_per_million_usd', 'per_call_usd')):
             raise ProviderError('unknown_price_' + engine)

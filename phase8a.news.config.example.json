@@ -100,6 +100,26 @@
           "https://www.bls.gov/feed/"
         ]
       }
+    },
+    {
+      "id": "newsbtc",
+      "publisher": "NewsBTC",
+      "adapter": "rss",
+      "url": "https://www.newsbtc.com/feed/",
+      "enabled": true,
+      "language": "en",
+      "category": "crypto",
+      "attribution": "NewsBTC (original publisher; RSS excerpt)",
+      "policy": {
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-12",
+        "basis": "Press policy expressly invites RSS reuse; site terms section 1 prioritizes material-specific terms. Limited private research using supplied RSS titles/descriptions, retaining attribution and original links. This is a scoped interpretation of RSS permission, not an explicit AI license; no article-page scraping, training, or public redistribution.",
+        "references": [
+          "https://www.newsbtc.com/press/",
+          "https://www.newsbtc.com/terms-and-conditions/"
+        ]
+      }
     }
   ]
 }

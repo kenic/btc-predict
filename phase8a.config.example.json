@@ -4,7 +4,13 @@
   "interval_seconds": 3600,
   "horizon_seconds": 14400,
   "lookback_hours": 24,
-  "allowed_sources": ["frb_press", "bls_cpi", "bls_empsit", "bls_jolts"],
+  "allowed_sources": [
+    "frb_press",
+    "bls_cpi",
+    "bls_empsit",
+    "bls_jolts",
+    "newsbtc"
+  ],
   "max_news": 5,
   "max_input_bytes": 2400,
   "max_output_tokens": 1024,
@@ -21,13 +27,37 @@
   "paper_notional_usd": 1000,
   "round_trip_cost_bps": 20,
   "engines": {
-    "gpt6_astra": {"model": "gpt-6-astra", "account_verified": false, "pricing_verified": false,
-      "input_per_million_usd": 10, "output_per_million_usd": 50, "per_call_usd": 0},
-    "claude_fable": {"model": "claude-fable-5-2", "account_verified": false, "pricing_verified": false,
-      "input_per_million_usd": 8, "output_per_million_usd": 40, "per_call_usd": 0},
-    "jev": {"model": "jev-latest", "account_verified": false, "pricing_verified": false,
-      "input_per_million_usd": null, "output_per_million_usd": null, "per_call_usd": null},
-    "kairos": {"model": "DMIND/Kairos", "account_verified": false, "pricing_verified": false,
-      "input_per_million_usd": null, "output_per_million_usd": null, "per_call_usd": null}
+    "gpt6_astra": {
+      "model": "gpt-6-astra",
+      "account_verified": false,
+      "pricing_verified": false,
+      "input_per_million_usd": 10,
+      "output_per_million_usd": 50,
+      "per_call_usd": 0
+    },
+    "claude_fable": {
+      "model": "claude-fable-5-2",
+      "account_verified": false,
+      "pricing_verified": false,
+      "input_per_million_usd": 8,
+      "output_per_million_usd": 40,
+      "per_call_usd": 0
+    },
+    "jev": {
+      "model": "jev-latest",
+      "account_verified": false,
+      "pricing_verified": false,
+      "input_per_million_usd": null,
+      "output_per_million_usd": null,
+      "per_call_usd": null
+    },
+    "kairos": {
+      "model": "DMIND/Kairos",
+      "account_verified": false,
+      "pricing_verified": false,
+      "input_per_million_usd": null,
+      "output_per_million_usd": null,
+      "per_call_usd": null
+    }
   }
 }

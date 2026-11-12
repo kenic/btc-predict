@@ -8,7 +8,7 @@ from .core import ENGINES, VERSION, canonical, digest, freeze, validate_config, 
 
 
 def result_base(engine, cutoff, frozen, config):
-    return dict(schema=VERSION, engine=engine, configured_model=config['engines'][engine]['model'],
+    return dict(schema=VERSION, symbol=config['symbol'], engine=engine, configured_model=config['engines'][engine]['model'],
                 model_version=None, provider_model_version=None, direction=None, probability_up=None,
                 probability_kind='uncalibrated', calibration_id=None, provider_confidence=None,
                 news_set_id=frozen['state']['news_set_id'], input_id=frozen['input_id'],
@@ -21,7 +21,7 @@ def result_base(engine, cutoff, frozen, config):
                 kairos_profile=config['kairos_profile'] if engine == 'kairos' else None)
 
 
-def run(db, news_db, config, cutoff=None, mode='offline', clock=time.time, call=None):
+def run(db, news_db, config, cutoff=None, mode='offline', clock=time.time, call=None, *, allow_unpriced_kairos=False, frozen_input=None):
     config = validate_config(config)
     now = number(clock())
     cutoff = int(now)//config['interval_seconds']*config['interval_seconds'] if cutoff is None else number(cutoff)
@@ -39,7 +39,11 @@ def run(db, news_db, config, cutoff=None, mode='offline', clock=time.time, call=
             raise ValueError('offline_live_database_mixing')
         if c.execute('SELECT 1 FROM cohorts WHERE cutoff=?', (cutoff,)).fetchone():
             return {'cutoff': cutoff, 'status': 'already_recorded_no_retry'}
-    frozen = freeze(snapshot(news_db, cutoff, hours=config['lookback_hours'], deduplicate=False), config, cutoff)
+    frozen = frozen_input or freeze(snapshot(news_db, cutoff, hours=config['lookback_hours'], deduplicate=False), config, cutoff)
+    if frozen['config_hash'] != digest(config) or frozen['state']['cutoff'] != cutoff:
+        raise ValueError('frozen_input_contract_mismatch')
+    if allow_unpriced_kairos:
+        frozen['unpriced_kairos_once_authorized'] = True
     if not store.add_cohort(db, cutoff, now, frozen, mode):
         return {'cutoff': cutoff, 'status': 'already_recorded_no_retry'}
     reason = None
@@ -50,7 +54,7 @@ def run(db, news_db, config, cutoff=None, mode='offline', clock=time.time, call=
         reason = 'source_stale'
     if not reason and mode == 'live':
         try:
-            adapters.preflight(config, frozen['state'])
+            adapters.preflight(config, frozen['state'], allow_unpriced_kairos=allow_unpriced_kairos)
             if not cutoff <= clock() <= cutoff+config['max_start_delay_seconds']:
                 raise ValueError('late_start')
             store.reserve_all(db, cutoff, clock(), config)
