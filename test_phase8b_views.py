@@ -44,6 +44,13 @@ class Phase8bViewTests(Phase8aViewTests):
         r=view.report(self.a,self.b)
         self.assertFalse(r['same_news']);self.assertEqual(r['paired']['hourly']['jev']['phase8a']['n'],0)
 
+    def test_no_8b_cohort_does_not_display_old_8a_as_same_time(self):
+        (self.b/'report.json').write_text(json.dumps({'assets':{},'schedule':[]}))
+        (self.b/'prediction-status.json').unlink()
+        r=view.report(self.a,self.b)
+        self.assertEqual(r['phase8a']['status'],'unavailable')
+        self.assertNotIn('80.0%',view.render(r))
+
     def test_missing_bad_cutoff_and_routes(self):
         self.assertEqual(view.report(self.a,self.b/'absent')['phase8b']['status'],'unavailable')
         for s,t in [('bad',None),('BTC-USD','../.env')]:
