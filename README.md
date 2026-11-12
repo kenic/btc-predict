@@ -53,3 +53,11 @@ six-candle short-gap recovery and no interpolation/historical automatic backfill
 Phase 6 actual RV uses the archive through the unchanged Phase 4 canonical helper.
 See [CANDLE_COLLECTOR.md](CANDLE_COLLECTOR.md) for schema, timing, tests and the
 operator-installed systemd service/timer. Older missing hours remain unavailable.
+
+## Phase 8a: common-news four-engine comparison
+
+See [PHASE8A.md](PHASE8A.md) for the current audit, offline demo, API setup,
+frozen evaluation contract and deployment procedure. The pilot is BTC-USD only,
+paper only, and paid calls are disabled by default. Keys are supplied separately.
+Phase 8pre collection and its remaining coverage limits are described in
+[PHASE8PRE.md](PHASE8PRE.md).

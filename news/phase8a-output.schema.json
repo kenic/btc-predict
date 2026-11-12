@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:btc-predict:phase8a:prediction:v1",
+  "title": "Phase 8a common output proposal; no model calls implemented",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "engine", "run_id", "as_of", "horizon_seconds", "target", "input_sha256", "news_versions", "status", "prediction", "reasoning", "evidence", "uncertainties"],
+  "properties": {
+    "schema_version": {"const": "phase8a.prediction.v1"},
+    "engine": {"enum": ["gpt6_astra", "claude_fable", "jev", "kairos"]},
+    "run_id": {"type": "string", "minLength": 1},
+    "as_of": {"type": "number", "minimum": 0},
+    "horizon_seconds": {"const": 14400},
+    "target": {"const": "BTC-USD"},
+    "input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "news_versions": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+    "status": {"enum": ["ok", "abstain", "error"]},
+    "prediction": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false,
+         "required": ["direction", "probability_up"],
+         "properties": {"direction": {"enum": ["UP", "DOWN"]}, "probability_up": {"type": "number", "minimum": 0, "maximum": 1}}}
+      ]
+    },
+    "reasoning": {"type": "string", "maxLength": 4000},
+    "evidence": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["version_id", "claim"],
+      "properties": {"version_id": {"type": "integer", "minimum": 1}, "claim": {"type": "string", "maxLength": 1000}}
+    }},
+    "uncertainties": {"type": "array", "items": {"type": "string", "maxLength": 1000}}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "ok"}}}, "then": {"properties": {"prediction": {"type": "object"}}}, "else": {"properties": {"prediction": {"type": "null"}}}}
+  ]
+}

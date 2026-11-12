@@ -22,3 +22,12 @@ direction_history_5m.json
 direction_history_5m.tmp
 
 scratch/
+
+# Independent news/comparison experiments; never commit credentials or observations.
+news.config.json
+phase8a.config.json
+.env.*
+!*.env.example
+*.db-*
+*.collector.lock
+outputs/

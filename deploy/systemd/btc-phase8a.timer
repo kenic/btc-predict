@@ -1,0 +1,11 @@
+[Unit]
+Description=Check configurable Phase 8a interval and mature prices each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:10 UTC
+AccuracySec=1s
+Persistent=false
+Unit=btc-phase8a.service
+
+[Install]
+WantedBy=timers.target

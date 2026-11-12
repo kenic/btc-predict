@@ -1,0 +1,105 @@
+{
+  "interval_seconds": 900,
+  "feeds": [
+    {
+      "id": "coindesk",
+      "publisher": "CoinDesk",
+      "adapter": "rss",
+      "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+      "enabled": false,
+      "language": "en",
+      "category": "crypto",
+      "attribution": "CoinDesk (original publisher)",
+      "policy": {
+        "mode": "blocked",
+        "model_input": false,
+        "reviewed_on": "2026-11-11",
+        "basis": "RSS is advertised, but terms require express written permission for automated access. Obtain permission covering archival raw RSS and AI input before enabling.",
+        "references": [
+          "https://www.coindesk.com/terms",
+          "https://www.coindesk.com/coindesk-news/2021/09/17/coindesk-rss"
+        ]
+      }
+    },
+    {
+      "id": "frb_press",
+      "publisher": "Federal Reserve Board",
+      "adapter": "rss",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "enabled": true,
+      "language": "en",
+      "category": "macro",
+      "attribution": "Board of Governors of the Federal Reserve System",
+      "policy": {
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-11",
+        "basis": "Board material public domain unless otherwise indicated; source attribution retained. RSS only, no linked third-party assets or article scraping.",
+        "references": [
+          "https://www.federalreserve.gov/disclaimer.htm",
+          "https://www.federalreserve.gov/feeds/feeds.htm"
+        ]
+      }
+    },
+    {
+      "id": "bls_cpi",
+      "publisher": "Bureau of Labor Statistics",
+      "adapter": "rss",
+      "url": "https://www.bls.gov/feed/cpi.rss",
+      "enabled": true,
+      "language": "en",
+      "category": "macro",
+      "attribution": "U.S. Bureau of Labor Statistics",
+      "policy": {
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-11",
+        "basis": "BLS publications public domain except previously copyrighted photos/illustrations. RSS text only, attribution retained.",
+        "references": [
+          "https://www.bls.gov/opub/copyright-information.htm",
+          "https://www.bls.gov/feed/"
+        ]
+      }
+    },
+    {
+      "id": "bls_empsit",
+      "publisher": "Bureau of Labor Statistics",
+      "adapter": "rss",
+      "url": "https://www.bls.gov/feed/empsit.rss",
+      "enabled": true,
+      "language": "en",
+      "category": "macro",
+      "attribution": "U.S. Bureau of Labor Statistics",
+      "policy": {
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-11",
+        "basis": "BLS publications public domain except previously copyrighted photos/illustrations. RSS text only, attribution retained.",
+        "references": [
+          "https://www.bls.gov/opub/copyright-information.htm",
+          "https://www.bls.gov/feed/"
+        ]
+      }
+    },
+    {
+      "id": "bls_jolts",
+      "publisher": "Bureau of Labor Statistics",
+      "adapter": "rss",
+      "url": "https://www.bls.gov/feed/jolts.rss",
+      "enabled": true,
+      "language": "en",
+      "category": "macro",
+      "attribution": "U.S. Bureau of Labor Statistics",
+      "policy": {
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-11",
+        "basis": "BLS publications public domain except previously copyrighted photos/illustrations. RSS text only, attribution retained.",
+        "references": [
+          "https://www.bls.gov/opub/copyright-information.htm",
+          "https://www.bls.gov/feed/"
+        ]
+      }
+    }
+  ]
+}
