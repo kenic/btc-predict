@@ -8,8 +8,10 @@
   "max_daily_calls": 480,
   "max_30day_calls": 14400,
   "config": "/opt/btc-phase8a/phase8a.config.json",
-  "news_db": "/opt/btc-news/news.db",
-  "btc_candles_db": "/opt/btc-predict/candles.db",
+  "news_db": "/opt/btc-phase8a/inputs/news.db",
+  "btc_candles_db": "/opt/btc-phase8a/inputs/candles.db",
   "directory": "/opt/btc-phase8a/outputs/hourly-20261112",
-  "additional_batches": ["/opt/btc-phase8a/outputs/real-news-pilot-1794453900"]
+  "additional_batches": [
+    "/opt/btc-phase8a/outputs/real-news-pilot-1794453900"
+  ]
 }

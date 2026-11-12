@@ -66,3 +66,35 @@ scheduleのenabled=falseにする。評価timerは継続させて保存済み予
 配置は`/opt/btc-phase8a`に限定。既存BTC予測・Web・価格・ニュース収集サービスは変更しない。
 追加で有効になっている収集元を発見しても、本タスクでは既存の許可設定を上書きせず、
 予測のallowlistも勝手に広げない。
+
+
+## 2026-11-12: 初回見送りとWAL読取の修正
+
+13:00 JSTはpreflight_skipped、0呼出し。ニュース収集は13:00:01までに成功し、
+予測は13:00:10に即時見送り。キー・設定の更新はなく、後から同じ入力の事前チェックは成功した。
+当時の例外詳細は保存されておらず、過去の例外を断定的に復元することはできない。
+
+同じsystemd保護設定で、補助ファイルが存在しないWAL方式のDBを開くと
+`sqlite3.OperationalError: unable to open database file`を再現した。
+SQLiteは読取り時でも-wal/-shmの作成が必要な場合があり、収集側の最終接続終了時には
+補助ファイルが削除され得る。確認済みの挙動は[公式仕様](https://sqlite.org/wal.html#read_only_databases)に一致する。
+補助ファイルが残った状態だけでの起動前確認では、この配置上の不具合を検出できなかった。
+
+既存本番ディレクトリ全体の書込み許可を広げる案は自動承認審査で拒否されたため、採用しない。
+代わりに既存収集サービスのExecStartPostからSQLite backup APIを使い、
+`/opt/btc-phase8a/inputs/{news,candles}.db`へ整合した読取り用コピーを作る。
+コピーはDELETE journal、0440、完成後にatomic replace。元DBはmode=ro/query_onlyで接続し、
+元のWAL方式・データ・収集コードは変更しない。元DBへのimmutable=1やraw file copyは使わない。
+収集サービスへの追加書込先は専用inputsディレクトリだけ。
+予測/評価サービスには既存本番領域の書込権限を与えず、inputs自体もReadOnlyPathsにする。
+ニュースの実取得時刻・記事版と価格の取得時刻はコピー内でもそのままなので、時点制約を維持する。
+
+配置時はdeploy/systemdのbtc-news-phase8a-export.confとbtc-candles-phase8a-export.confを
+各収集unitのservice.d/phase8a-export.confへ置き、inputsをubuntu所有・0700で準備する。
+既存ExecStartを置き換えない。収集後にコピーが存在することを確認してからschedule.jsonの
+news_db/btc_candles_dbをコピーへ向ける。予測Pythonコードと凍結contractは変更しない。
+13:00の見送りは保持し、後追い予測はしない。出力失敗時は前回のコピーを保持する。
+ニュースコピーが古ければ既存stale判定で見送り、価格が不足していれば照合をpendingとする。
+
+回帰確認: 未チェックポイントのWAL内容の反映、元DBが不変、書込拒否、補助ファイル不要、
+読取中のatomic replacement、失敗時に前回コピーを保持することをテスト。

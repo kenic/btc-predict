@@ -16,3 +16,6 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/opt/btc-phase8a
+
+# Consistent collector exports need no writable WAL sidecars.
+ReadOnlyPaths=/opt/btc-phase8a/inputs
