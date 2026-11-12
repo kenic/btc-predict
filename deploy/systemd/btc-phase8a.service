@@ -1,5 +1,5 @@
 [Unit]
-Description=BTC Phase 8a prospective news comparison and paper evaluation
+Description=Phase 8a hourly five-asset news prediction (paper only)
 After=network-online.target
 
 [Service]
@@ -7,10 +7,9 @@ Type=oneshot
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/btc-phase8a
-EnvironmentFile=/opt/btc-phase8a/.env.phase8a
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/btc-predict/.venv/bin/python -m phase8a.cli tick --config /opt/btc-phase8a/phase8a.config.json --db /opt/btc-phase8a/phase8a.db --news-db /opt/btc-news/news.db --candles-db /opt/btc-predict/candles.db --live
-TimeoutStartSec=180
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8a.scheduled predict --schedule /opt/btc-phase8a/phase8a.schedule.json --env-file /opt/btc-phase8a/.env.phase8a
+TimeoutStartSec=150
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

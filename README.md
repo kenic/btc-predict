@@ -63,3 +63,5 @@ Phase 8pre collection and its remaining coverage limits are described in
 [PHASE8PRE.md](PHASE8PRE.md).
 
 Manual real-news five-asset test and follow-up evaluation: [PHASE8A-MULTIASSET.md](PHASE8A-MULTIASSET.md). No prediction schedule is enabled.
+
+Hourly five-asset predictions and automatic four-hour evaluation: [PHASE8A-HOURLY.md](PHASE8A-HOURLY.md). The 2026-11-12 user instruction authorizes this scheduled deployment; example settings remain disabled.

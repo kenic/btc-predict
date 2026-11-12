@@ -31,3 +31,5 @@ phase8a.config.json
 *.db-*
 *.collector.lock
 outputs/
+
+phase8a.schedule.json

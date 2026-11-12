@@ -1,0 +1,11 @@
+[Unit]
+Description=Check mature Phase 8a outcomes each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:40 UTC
+AccuracySec=1s
+Persistent=false
+Unit=btc-phase8a-evaluate.service
+
+[Install]
+WantedBy=timers.target

@@ -1,8 +1,8 @@
 [Unit]
-Description=Check configurable Phase 8a interval and mature prices each minute
+Description=Hourly Phase 8a predictions, no historical catch-up
 
 [Timer]
-OnCalendar=*-*-* *:*:10 UTC
+OnCalendar=*-*-* *:00:10 UTC
 AccuracySec=1s
 Persistent=false
 Unit=btc-phase8a.service

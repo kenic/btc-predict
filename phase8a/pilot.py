@@ -82,7 +82,7 @@ def summarize(directory):
 
 
 def run_batch(config, news_db, directory, cutoff, *, known_budget_usd=.99, allow_unpriced_kairos=False,
-              clock=time.time, call=None):
+              clock=time.time, call=None, prepared=None):
     if not 0 < known_budget_usd <= .99:
         raise ValueError('pilot_budget_limit')
     if cutoff % 300 or not cutoff <= clock() <= cutoff+config['max_start_delay_seconds']:
@@ -94,7 +94,7 @@ def run_batch(config, news_db, directory, cutoff, *, known_budget_usd=.99, allow
         # A started batch is NEVER resumed, even after a crash before the first HTTP call.
         if (directory/'manifest.json').exists():
             raise ValueError('pilot_already_started_no_retry')
-        plans, ceiling = prepare(config, news_db, cutoff, allow_unpriced_kairos)
+        plans, ceiling = prepared if prepared is not None else prepare(config, news_db, cutoff, allow_unpriced_kairos)
         if ceiling > known_budget_usd:
             raise ValueError('aggregate_known_price_ceiling_exceeded')
         manifest = dict(cutoff=cutoff, horizon_seconds=config['horizon_seconds'], symbols=SYMBOLS,
