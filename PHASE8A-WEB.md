@@ -35,3 +35,21 @@ HEAD, preserving the Phase 8pre dashboard and all earlier features.
 Deploy only the additive Web commit to `/opt/btc-predict` and restart `btc-web.service`. Do not copy
 the experiment checkout wholesale or restart prediction/collection services. Rollback uses the
 previous Web commit and a Web-only restart. Keep all experiment databases and outputs.
+
+## 追加評価：40/60%の見送り帯
+
+2026-11-12に表示専用の追加評価を導入。予測コード・プロンプト・保存済み結果は変更しない。
+上昇確率 p <= 0.4 はDOWN、p >= 0.6 はUP、それ以外はABSTAIN（見送り）。
+丸め前の確率を使い、見送りを横ばい予測やAPI失敗と混同しない。
+的中率の分母は判断ありの件数。見送り率の分母は答え合わせ済みの全有効件数。
+BrierとLogLossには見送りも含め、従来どおり全確率を使う。
+全件見送りなら的中率はnull/—、見送り率は100%。0件なら両率ともnull/—。
+
+8a・8b単独は全4回答が成功した共通時刻、8a/8b比較は従来の同一ニュース・実現価格・
+全8回答成功の共通時刻に限定する。その上で各モデルの判断件数は異なりうる。
+毎時の重複評価と4時間非重複評価を分ける。集計は保存済みの全履歴を用い、
+最近の答え合わせ表示80行や時刻選択肢72件による切り詰めの影響を受けない。
+過去結果への追加集計であり、従来の50%境界評価は保存・表示とも維持する。
+JSONでは従来の `correct` / `direction` / `paired` を維持し、`decision`、
+`selective_evaluation`（単独）、`paired_selective`（条件間比較）を追加。
+Web表示のみの変更で、ペーパートレードの既存ルールも変更しない。
