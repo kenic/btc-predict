@@ -1,0 +1,11 @@
+[Unit]
+Description=Phase 8b -collect
+
+[Timer]
+OnCalendar=*-*-* *:56:15 UTC
+AccuracySec=1s
+Persistent=false
+Unit=btc-phase8b-collect.service
+
+[Install]
+WantedBy=timers.target

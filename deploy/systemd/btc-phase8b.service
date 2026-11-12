@@ -1,0 +1,18 @@
+[Unit]
+Description=Phase 8b prediction (paper only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-phase8b
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8b.scheduled predict --schedule /opt/btc-phase8b/phase8b.schedule.json --env-file /opt/btc-phase8a/.env.phase8a
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/btc-phase8b/outputs

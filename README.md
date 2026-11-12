@@ -54,6 +54,17 @@ Phase 6 actual RV uses the archive through the unchanged Phase 4 canonical helpe
 See [CANDLE_COLLECTOR.md](CANDLE_COLLECTOR.md) for schema, timing, tests and the
 operator-installed systemd service/timer. Older missing hours remain unavailable.
 
+## Phase 8a: common-news four-engine comparison
+
+See [PHASE8A.md](PHASE8A.md) for the current audit, offline demo, API setup,
+frozen evaluation contract and deployment procedure. The manual pilot supports BTC, ETH, SOL, XRP and LINK (USD pairs),
+paper only, and paid calls are disabled by default. Keys are supplied separately.
+Phase 8pre collection and its remaining coverage limits are described in
+[PHASE8PRE.md](PHASE8PRE.md).
+
+Manual real-news five-asset test and follow-up evaluation: [PHASE8A-MULTIASSET.md](PHASE8A-MULTIASSET.md). The subsequently authorized hourly service is documented below.
+
+Hourly five-asset predictions and automatic four-hour evaluation: [PHASE8A-HOURLY.md](PHASE8A-HOURLY.md). The 2026-11-12 user instruction authorizes this scheduled deployment; example settings remain disabled.
 ## Phase 8pre news dashboard
 
 The read-only [Phase 8pre page](https://btc.kenic.jp/phase8pre/) shows collection
@@ -65,3 +76,10 @@ testing, the independent news DB, deployment and rollback.
 ## Phase 8a dashboard
 
 The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset forecasts, four-hour outcomes, metrics and execution history. See [PHASE8A-WEB.md](PHASE8A-WEB.md) for public-field restrictions and deployment.
+
+### Phase 8b: テクニカル指標＋ニュース
+
+[8a / 8b比較画面](https://btc.kenic.jp/phase8b/)で、同一時刻・同一ニュースを使う
+5銘柄・4エンジンの毎時予測と4時間後の答え合わせを比較できます。
+8aはニュースのみを維持。8bは予測時点までに取得済みの5分足から指標を追加します。
+構成・指標定義・運用・停止手順は [PHASE8B.md](PHASE8B.md) を参照してください。
