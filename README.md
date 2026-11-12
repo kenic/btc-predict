@@ -65,3 +65,10 @@ Phase 8pre collection and its remaining coverage limits are described in
 Manual real-news five-asset test and follow-up evaluation: [PHASE8A-MULTIASSET.md](PHASE8A-MULTIASSET.md). The subsequently authorized hourly service is documented below.
 
 Hourly five-asset predictions and automatic four-hour evaluation: [PHASE8A-HOURLY.md](PHASE8A-HOURLY.md). The 2026-11-12 user instruction authorizes this scheduled deployment; example settings remain disabled.
+## Phase 8pre news dashboard
+
+The read-only [Phase 8pre page](https://btc.kenic.jp/phase8pre/) shows collection
+health, polling coverage and the news known at a chosen cutoff. CoinDesk RSS,
+FRB and BLS headlines are displayed with acquisition history and source attribution.
+See [NEWS_DASHBOARD.md](NEWS_DASHBOARD.md) for query semantics, permissions,
+testing, the independent news DB, deployment and rollback.
