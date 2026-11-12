@@ -50,7 +50,7 @@ def scores(pairs):
 def report(root_a, root_b, symbol='BTC-USD', cutoff=None):
     b=base.report(root_b,symbol,cutoff)
     selected=b.get('selected_cutoff')
-    try:a=base.report(root_a,symbol,selected)
+    try:a=base.report(root_a,symbol,selected) if selected is not None else {'status':'unavailable','symbol':symbol}
     except ValueError:a={'status':'unavailable','symbol':symbol}
     output={'phase8a':a,'phase8b':b,'paired':{},'technical':{},'same_news':False}
     try:
@@ -76,6 +76,7 @@ def render(data):
     a,b=data['phase8a'],data['phase8b'];symbol=b['symbol']
     main=base.render(b).split('<main>',1)[1].split('</main>',1)[0]
     main=main.replace('/phase8a/','/phase8b/').replace('Phase 8a · ニュース予測比較','Phase 8b · テクニカル＋ニュース')
+    main=main.replace('主評価：4時間ごとの非重複予測','8b単独の主評価：4時間ごとの非重複予測').replace('参考評価：毎時の予測（評価期間が重複）','8b単独の参考評価：毎時の予測（評価期間が重複）')
     intro='<p><a href="/phase8a/?'+urlencode({'symbol':symbol})+'">8a：ニュースのみの詳細</a> ／ 8b：テクニカル＋ニュース。同じ予測時刻・同じ記事で比較します。</p>'
     if b.get('status')=='ok':
         if a.get('stale') or a.get('status')!='ok':intro+='<p>8aの比較データが未取得、または更新が遅れています。</p>'
