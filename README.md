@@ -53,3 +53,11 @@ six-candle short-gap recovery and no interpolation/historical automatic backfill
 Phase 6 actual RV uses the archive through the unchanged Phase 4 canonical helper.
 See [CANDLE_COLLECTOR.md](CANDLE_COLLECTOR.md) for schema, timing, tests and the
 operator-installed systemd service/timer. Older missing hours remain unavailable.
+
+## Phase 8pre news dashboard
+
+The read-only [Phase 8pre page](https://btc.kenic.jp/phase8pre/) shows collection
+health, polling coverage and the news known at a chosen cutoff. CoinDesk RSS,
+FRB and BLS headlines are displayed with acquisition history and source attribution.
+See [NEWS_DASHBOARD.md](NEWS_DASHBOARD.md) for query semantics, permissions,
+testing, the independent news DB, deployment and rollback.

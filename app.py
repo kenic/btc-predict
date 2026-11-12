@@ -1,6 +1,7 @@
 from ui import page_shell
 import html
 import math
+import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from flask import Flask, abort, request
 app = Flask(__name__)
 
 DB_PATH = Path(__file__).parent / "btc.db"
+NEWS_DB_PATH = Path(os.environ.get("BTC_NEWS_DB", "/opt/btc-news/news.db"))
 
 COINBASE_URL = (
     "https://api.exchange.coinbase.com/"
@@ -1352,6 +1354,26 @@ def phase7_page():
 def phase7_data():
     from phase7_views import report
     return report(DB_PATH.parent/'phase7.db')
+
+
+@app.route('/phase8pre/')
+@app.route('/phase8pre/data.json')
+def phase8pre_dashboard():
+    import time
+    from news_views import parse_cutoff, report, render
+    now = time.time()
+    try:
+        cutoff = parse_cutoff(request.args.get('as_of'), now)
+        data = report(NEWS_DB_PATH, cutoff, request.args.get('source', 'all'))
+    except ValueError as error:
+        if request.path.endswith('.json'):
+            return {'status': 'invalid_request', 'message': str(error)}, 400
+        data = dict(status='unavailable', as_of=now, source='all')
+        return render(data, historical=True, error=str(error)), 400
+    status = 200 if data['status'] == 'ok' else 503
+    if request.path.endswith('.json'):
+        return data, status
+    return render(data, historical=bool(request.args.get('as_of'))), status
 
 
 if __name__ == "__main__":
