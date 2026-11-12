@@ -1,0 +1,18 @@
+[Unit]
+Description=Phase 8c -collect (paper only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-phase8c
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8c.technical --db /opt/btc-phase8c/data/technical.sqlite3 --btc-market-db /opt/btc-predict/market.db
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/btc-phase8c/data

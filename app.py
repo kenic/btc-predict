@@ -1403,6 +1403,19 @@ def phase8b_dashboard():
     return (data if request.path.endswith('.json') else render(data)), (200 if data['phase8b']['status']=='ok' else 503)
 
 
+PHASE8C_WEB_ROOT = Path('/opt/btc-phase8c/outputs/hourly-v1')
+
+@app.route('/phase8c/')
+@app.route('/phase8c/data.json')
+def phase8c_dashboard():
+    from phase8c_views import report, render
+    try:
+        data=report(PHASE8A_WEB_ROOT,PHASE8B_WEB_ROOT,PHASE8C_WEB_ROOT,request.args.get('symbol','BTC-USD'),request.args.get('cutoff'))
+    except ValueError:
+        return {'status':'invalid_request','message':'銘柄または予測時刻を確認してください。'},400
+    return (data if request.path.endswith('.json') else render(data)), (200 if data['phase8c']['status']=='ok' else 503)
+
+
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
