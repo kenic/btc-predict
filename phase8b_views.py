@@ -52,7 +52,7 @@ def report(root_a, root_b, symbol='BTC-USD', cutoff=None):
     selected=b.get('selected_cutoff')
     try:a=base.report(root_a,symbol,selected) if selected is not None else {'status':'unavailable','symbol':symbol}
     except ValueError:a={'status':'unavailable','symbol':symbol}
-    output={'phase8a':a,'phase8b':b,'paired':{},'technical':{},'same_news':False}
+    output={'phase8a':a,'phase8b':b,'paired':{},'paired_selective':{},'technical':{},'same_news':False}
     try:
         sa,sb=[summary(root,selected,symbol) for root in (root_a,root_b)]
         output['same_news']=bool(sa.get('news_set_id')) and sa['news_set_id']==sb.get('news_set_id')
@@ -67,6 +67,8 @@ def report(root_a, root_b, symbol='BTC-USD', cutoff=None):
     except (OSError,ValueError,KeyError,TypeError,AttributeError):rows=[]
     for mode in ('nonoverlap','hourly'):
         selected_rows=[r for r in rows if mode=='hourly' or r[0]%14400==0]
+        output['paired_selective'][mode]={e:{label:base.selective_scores([(r[i][e]['probability_up'],r[i][e]['actual_up']) for r in selected_rows])
+            for i,label in ((1,'phase8a'),(2,'phase8b'))} for e in base.ENGINES}
         output['paired'][mode]={e:{label:scores([(r[i][e]['probability_up'],r[i][e]['actual_up']) for r in selected_rows])
             for i,label in ((1,'phase8a'),(2,'phase8b'))} for e in base.ENGINES}
     return output
@@ -84,12 +86,19 @@ def render(data):
         answers=[{v['engine']:v for v in r.get('answers',[]) if v['cutoff']==b['selected_cutoff']} for r in (a,b)]
         rows=[]
         for e in base.ENGINES:
-            result=lambda d:'的中' if d.get('correct') is True else '外れ' if d.get('correct') is False else '未確定'
+            result=lambda d,p:base.selective_result(p.get('probability_up'),d.get('correct'),p.get('status')=='ok')
             rows.append([base.LABELS[e],base.pct(pred_a.get(e,{}).get('probability_up')),base.pct(pred_b.get(e,{}).get('probability_up')),
-                         result(answers[0].get(e,{})),result(answers[1].get(e,{}))])
-        intro+=card('同時刻比較 · '+base.stamp(b['selected_cutoff']),styled_table(('エンジン','8a 上昇確率','8b 上昇確率','8a 答え合わせ','8b 答え合わせ'),rows)+
+                         result(answers[0].get(e,{}),pred_a.get(e,{})),result(answers[1].get(e,{}),pred_b.get(e,{}))])
+        intro+=card('同時刻比較 · '+base.stamp(b['selected_cutoff']),styled_table(('エンジン','8a 上昇確率','8b 上昇確率','8a 答え合わせ（見送り除外）','8b 答え合わせ（見送り除外）'),rows)+
                     ('<p>同一ニュース集合を確認済み。</p>' if data['same_news'] else '<p>両条件の同一ニュースは未確認です。比較成績には算入しません。</p>'))
-    for mode,title in (('nonoverlap','8a vs 8b：共通時刻のみ・4時間非重複'),('hourly','参考：共通時刻のみ・毎時（期間重複）')):
+    intro+=base.SELECTIVE_NOTE
+    for mode,title in (('nonoverlap','8a vs 8b 追加評価：見送りあり・4時間非重複'),('hourly','8a vs 8b 追加参考評価：見送りあり・毎時（期間重複）')):
+        rows=[]
+        for e,v in data['paired_selective'][mode].items():
+            for label in ('phase8a','phase8b'):
+                rows.append([base.LABELS[e],label.replace('phase','')]+base.selective_cells(v[label]))
+        intro+=card(title,styled_table(('エンジン','条件')+base.SELECTIVE_HEADERS[1:],rows)+'<p>同一ニュース・実現価格かつ全8回答成功の共通時刻が対象です。判断件数はエンジン・条件によって異なります。</p>')
+    for mode,title in (('nonoverlap','8a vs 8b 従来評価（50%境界）：共通時刻・4時間非重複'),('hourly','従来参考評価（50%境界）：共通時刻・毎時（期間重複）')):
         rows=[]
         for e,v in data['paired'][mode].items():
             for label in ('phase8a','phase8b'):

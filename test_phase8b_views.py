@@ -44,6 +44,18 @@ class Phase8bViewTests(Phase8aViewTests):
         r=view.report(self.a,self.b)
         self.assertFalse(r['same_news']);self.assertEqual(r['paired']['hourly']['jev']['phase8a']['n'],0)
 
+    def test_selective_comparison_retains_legacy_and_full_probability_scores(self):
+        for v in self.r['answers']:v.update(probability_up=.49,actual_up=0,correct=True)
+        self.root=self.a;self.save();self.root=self.b;self.save();self.root=self.a
+        r=view.report(self.a,self.b)
+        old=r['paired']['hourly']['jev']['phase8a']
+        new=r['paired_selective']['hourly']['jev']['phase8a']
+        self.assertEqual(old['accuracy'],1)
+        self.assertIsNone(new['accuracy']);self.assertEqual(new['abstention_rate'],1)
+        self.assertEqual(new['brier'],old['brier']);self.assertEqual(new['logloss'],old['logloss'])
+        self.assertEqual(r['paired_selective']['nonoverlap']['jev']['phase8a']['n'],0)
+        self.assertIn('見送り率',view.render(r));self.assertIn('従来評価',view.render(r))
+
     def test_no_8b_cohort_does_not_display_old_8a_as_same_time(self):
         (self.b/'report.json').write_text(json.dumps({'assets':{},'schedule':[]}))
         (self.b/'prediction-status.json').unlink()
