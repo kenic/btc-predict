@@ -76,3 +76,10 @@ testing, the independent news DB, deployment and rollback.
 ## Phase 8a dashboard
 
 The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset forecasts, four-hour outcomes, metrics and execution history. See [PHASE8A-WEB.md](PHASE8A-WEB.md) for public-field restrictions and deployment.
+
+### Phase 8b: テクニカル指標＋ニュース
+
+[8a / 8b比較画面](https://btc.kenic.jp/phase8b/)で、同一時刻・同一ニュースを使う
+5銘柄・4エンジンの毎時予測と4時間後の答え合わせを比較できます。
+8aはニュースのみを維持。8bは予測時点までに取得済みの5分足から指標を追加します。
+構成・指標定義・運用・停止手順は [PHASE8B.md](PHASE8B.md) を参照してください。

@@ -1,0 +1,11 @@
+[Unit]
+Description=Phase 8b -evaluate
+
+[Timer]
+OnCalendar=*-*-* *:*:50 UTC
+AccuracySec=1s
+Persistent=false
+Unit=btc-phase8b-evaluate.service
+
+[Install]
+WantedBy=timers.target
