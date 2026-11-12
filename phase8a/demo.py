@@ -23,7 +23,7 @@ def build_demo(directory):
     source = load_config(ROOT/'news.config.example.json')['feeds'][1]
     from datetime import datetime, timezone
     pub = datetime.fromtimestamp(t-120, timezone.utc).isoformat()
-    body = ('<rss><channel><item><guid>fixture</guid><title>SYNTHETIC economic announcement</title>'
+    body = ('<rss><channel><item><guid>fixture</guid><title>SYNTHETIC inflation announcement</title>'
             '<link>https://example.org/synthetic</link><pubDate>'+pub+'</pubDate>'
             '<description>Fixture only, not a real announcement.</description></item></channel></rss>').encode()
     entries, rejected = parse_rss(body, source)
