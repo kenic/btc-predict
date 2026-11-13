@@ -95,3 +95,45 @@ exclusion. Live first prediction / first four-hour result must be checked separa
 
 Coinbase trade-side and pagination specification:
 https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-trades
+
+## BTC trade gap repair (2026-11-13)
+
+The 12:00, 13:00 and 15:00 JST skips had 17, 140 and 120 missing BTC IDs,
+respectively. Neither archive contained these IDs. Representative missing IDs
+1120598348, 1120796381 and 1121007949 were returned by the public trade API during
+a later diagnostic lookup. Diagnostic replies were kept outside the input archive;
+they do not establish that those trades were available at the original cutoffs.
+The original poll responses were not retained, so the exact upstream reason for
+the initial omission cannot be reconstructed. The confirmed collector defect was
+that overlap with the previous maximum ID did not trigger repair of internal gaps.
+
+`phase8c.micro.repair_recent` now rechecks the most recent 65 minutes of saved BTC
+IDs after normal collection. It uses bounded public cursor requests at the known
+right-hand side of a gap, at most two pages of 1000 per poll. Unresolved gaps are
+retried on later collection cycles. The same GET endpoint/cursor behavior was
+verified against the actual missing IDs. No prediction-time fetching is added.
+Reference: https://docs.cdp.coinbase.com/exchange/rest-api/pagination
+
+Every newly found row is first observed at actual repair response time. Existing
+rows and timestamps are never overwritten. Future-dated/malformed responses are
+rejected; attempts, response hashes and insertion counts are stored in the new
+`trade_repairs` audit table. Gaps that cannot be repaired before cutoff still fail
+the original strict completeness check. The 30s freshness/45s book coverage rules,
+news manifest, all model/prompt settings and the 4h target are unchanged.
+
+This is an 8c-only collector release. Preserve original files and contract, copy
+existing run artifacts/SQLite snapshots and ledger reservations into
+`/opt/btc-phase8c/outputs/trade-repair-v1-20261113`, and start a new contract at a
+future hourly cutoff. Carry `news-policy.json` with the original shared-news
+transition time, so the Web does not label this as a news-policy change. Switch
+only the 8c schedule/output and Web root. 8a/8b services, code and settings remain
+unchanged. Original skipped cutoffs are not retried or relabeled as successes.
+No ChatGPT monitoring automation is resumed.
+
+Tests: `python -m unittest tests_phase8c.test_trade_repair
+ tests_phase8c.test_phase8c -q` (one line), plus shared-news and Web regression tests.
+When validating repairs on live data, inspect audit counts and immutable observed
+times; never backdate a repair to make a historical prediction pass. Check the first
+new scheduled cohort separately. To roll back, stop only 8c prediction/evaluation
+and its micro collector briefly, restore the saved 8c release/schedule and Web root,
+then restart them. The extra audit table is additive and can remain in the archive.

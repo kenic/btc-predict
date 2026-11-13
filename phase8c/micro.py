@@ -1,4 +1,4 @@
-"""Public altcoin collector; BTC reuses existing read-only archive. No credentials."""
+"""Public market archive with bounded BTC gap repair and immutable availability."""
 import argparse
 import hashlib
 import json
@@ -14,6 +14,9 @@ from .core import SYMBOLS,canonical,digest,timestamp
 
 APP_ID=0x5038434d
 WINDOWS=(1,5,15,60)
+REPAIR_LOOKBACK_SECONDS=3900
+REPAIR_MAX_PAGES=2
+REPAIR_VERSION='btc-recent-id-gap-repair-v1'
 BOOK_KEYS=('spread','top5_imbalance','top10_imbalance','top20_imbalance','microprice_offset')
 
 
@@ -27,6 +30,9 @@ def connect(path,readonly=False):
         c.execute('CREATE INDEX trade_event ON trades(symbol,event)')
         c.execute('CREATE TABLE polls(symbol TEXT,observed REAL,complete INTEGER,PRIMARY KEY(symbol,observed))');c.commit()
     elif app!=APP_ID:c.close();raise ValueError('not_phase8c_micro_archive')
+    if not readonly:
+        c.execute('CREATE TABLE IF NOT EXISTS trade_repairs(symbol TEXT, observed REAL, anchor INTEGER, status TEXT, fetched INTEGER, inserted INTEGER, response_hash TEXT, PRIMARY KEY(symbol,observed,anchor))')
+        c.commit()
     if readonly:c.execute('PRAGMA query_only=ON')
     return c
 
@@ -59,6 +65,55 @@ def trade(row):
     return dict(id=tid,event=event,price=price,size=size,aggressor='buy' if row['side']=='sell' else 'sell')
 
 
+def recent_gaps(path,symbol,now):
+    """Audit IDs before time filtering; include the preceding archived boundary ID.
+
+    Only already observed rows may steer repair. A 65m window covers the next
+    hourly 60m input, including its left boundary. No missing-ID expansion.
+    """
+    with closing(connect(path,True)) as c:
+        first=c.execute('SELECT min(id) FROM trades WHERE symbol=? AND event>=? AND event<=? AND observed<=?',
+                        (symbol,now-REPAIR_LOOKBACK_SECONDS,now,now)).fetchone()[0]
+        if first is None:return []
+        previous=c.execute('SELECT max(id) FROM trades WHERE symbol=? AND id<? AND observed<=?',(symbol,first,now)).fetchone()[0]
+        ids=[r[0] for r in c.execute('SELECT id FROM trades WHERE symbol=? AND id>=? AND observed<=? ORDER BY id',
+                                   (symbol,previous if previous is not None else first,now))]
+    return [(a+1,b-1,b) for a,b in zip(ids,ids[1:]) if b>a+1]
+
+
+def repair_recent(path,symbol,clock=time.time):
+    """Public GETs only; never called by prediction/freeze or outcome evaluation.
+
+    Request older trades at the known right-hand cursor adjacent to a gap.
+    Two pages maximum per poll; unresolved gaps retry during later collection,
+    not during prediction. Responses are newly available at actual receipt time.
+    """
+    if symbol!='BTC-USD':return dict(pages=0,inserted=0)
+    tried=set();total=0;pages=0
+    for _ in range(REPAIR_MAX_PAGES):
+        gap=next((g for g in recent_gaps(path,symbol,clock()) if g[2] not in tried),None)
+        if gap is None:break
+        anchor=gap[2];tried.add(anchor);pages+=1
+        status='failed';parsed=[];inserted=0;response_hash=None
+        try:
+            page,_=get(symbol,'trades',after=str(anchor),limit=1000)
+            parsed=[trade(r) for r in page];observed=clock()
+            if not parsed or len(parsed)>1000 or len({r['id'] for r in parsed})!=len(parsed):raise ValueError('invalid_repair_page')
+            if any(r['event']>observed or r['id']>=anchor for r in parsed):raise ValueError('invalid_repair_range')
+            response_hash=digest(parsed)
+            with closing(connect(path)) as c,c:
+                for r in parsed:
+                    cur=c.execute('INSERT OR IGNORE INTO trades VALUES(?,?,?,?,?)',(symbol,r['id'],r['event'],observed,canonical(r)))
+                    inserted+=cur.rowcount
+            total+=inserted;status='stored'
+        except Exception:
+            observed=clock()
+        with closing(connect(path)) as c,c:
+            c.execute('INSERT OR IGNORE INTO trade_repairs VALUES(?,?,?,?,?,?,?)',
+                      (symbol,observed,anchor,status,len(parsed),inserted,response_hash))
+    return dict(pages=pages,inserted=total)
+
+
 def collect_symbol(path,symbol,clock=time.time):
     try:
         if symbol!='BTC-USD':
@@ -80,7 +135,8 @@ def collect_symbol(path,symbol,clock=time.time):
         with closing(connect(path)) as c,c:
             for r in rows:c.execute('INSERT OR IGNORE INTO trades VALUES(?,?,?,?,?)',(symbol,r['id'],r['event'],observed,canonical(r)))
             c.execute('INSERT INTO polls VALUES(?,?,?)',(symbol,observed,int(complete)))
-        return {'symbol':symbol,'status':'ok','continuous':complete}
+        repair=repair_recent(path,symbol,clock)
+        return {'symbol':symbol,'status':'ok','continuous':complete,'gap_repair':repair}
     except Exception:return {'symbol':symbol,'status':'public_micro_fetch_failed'}
 
 

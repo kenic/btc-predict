@@ -154,6 +154,13 @@ class Phase8cTests(Phase8aTests):
             self.assertEqual(r['assets']['BTC-USD']['engines']['gpt6_astra']['paired_nonoverlap_primary']['n'],1)
             self.assertEqual(scheduled.evaluate_batches(p,lambda:T+15000)['newly_evaluated'],0)
 
+    def test_collector_release_preserves_news_policy_date(self):
+        p=self.setup_pair();p['start_cutoff']=T+3600
+        root=Path(p['directory']);root.mkdir()
+        (root/'news-policy.json').write_text(canonical({'since':T}))
+        r=scheduled.aggregate(p,lambda:T)
+        self.assertEqual(r['news_policy']['since'],T)
+
     def test_budget_and_no_backfill(self):
         p=self.setup_pair();p['max_daily_calls']=19
         with patch('phase8c.adapters.preflight'):

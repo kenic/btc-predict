@@ -90,3 +90,5 @@ See [Phase 8c operation and comparison contract](PHASE8C.md).
 Hourly 4h forecasts with multi-timeframe indicators, orderbook, trade flow and news; /phase8c/ compares 8a, 8b and 8c.
 
 Shared news continuity and source transition: [NEWS_CONTINUITY.md](NEWS_CONTINUITY.md).
+
+BTC trade-gap repair for 8c preserves actual first-observed timestamps; see [PHASE8C.md](PHASE8C.md).

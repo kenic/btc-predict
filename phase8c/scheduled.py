@@ -163,7 +163,12 @@ def aggregate(policy, clock=time.time):
         from .core import freeze, SELECTION_VERSION
         config=validate_config(json.loads(Path(policy['config']).read_text()))
         snap=snapshot(policy['news_db'],output['as_of'],hours=config['lookback_hours'],deduplicate=False)
-        output['news_policy']={'selection_version':SELECTION_VERSION,'since':policy['start_cutoff'],'allowed_sources':config['allowed_sources']}
+        news_since=policy['start_cutoff']
+        annotation=Path(policy['directory'])/'news-policy.json'
+        if annotation.exists():
+            preserved=json.loads(annotation.read_text()).get('since')
+            if type(preserved) is int and 0<preserved<=policy['start_cutoff']:news_since=preserved
+        output['news_policy']={'selection_version':SELECTION_VERSION,'since':news_since,'allowed_sources':config['allowed_sources']}
         output['news_availability']={'as_of':output['as_of'],'sources':[
             {'id':r['feed_id'],'healthy':r['enabled'] and not r['stale'],
              'articles_24h':sum(n['source_id']==r['feed_id'] for n in snap['news'])}

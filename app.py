@@ -1403,7 +1403,7 @@ def phase8b_dashboard():
     return (data if request.path.endswith('.json') else render(data)), (200 if data['phase8b']['status']=='ok' else 503)
 
 
-PHASE8C_WEB_ROOT = Path('/opt/btc-phase8c/outputs/news-v2-20261113')
+PHASE8C_WEB_ROOT = Path('/opt/btc-phase8c/outputs/trade-repair-v1-20261113')
 
 @app.route('/phase8c/')
 @app.route('/phase8c/data.json')
