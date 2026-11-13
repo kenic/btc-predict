@@ -90,3 +90,6 @@ The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset foreca
 multi-timeframe indicators, raw recent candles, orderbook and trade flow plus the
 same archived news. Keeps 8a/8b intact; hourly, 4h horizon, four engines, five assets.
 Read-only Web comparison at `/phase8c/`, with legacy and abstention-aware metrics.
+
+News continuity and the shared-source transition for 8a/8b/8c are documented in
+[NEWS_CONTINUITY.md](NEWS_CONTINUITY.md).

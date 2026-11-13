@@ -101,6 +101,12 @@ def _report(root, symbol='BTC-USD', cutoff=None, now=None):
          'selected_cutoff':selected,'target_end':selected+14400 if selected is not None else None,
          'history':schedule,'assets':{},'predictions':[], 'answers':[], 'news_count':None,'direct_news_count':None,
          'known_cost_usd':None,'unknown_cost_calls':None,'paper':{}}
+    policy=r.get('news_policy') or {}
+    out['news_policy_since']=number(policy.get('since'))
+    availability=r.get('news_availability') or {}
+    out['news_available_now']=number((availability.get('assets') or {}).get(symbol))
+    out['news_sources']=[{'id':v['id'],'healthy':v.get('healthy') is True,'articles_24h':number(v.get('articles_24h'))}
+        for v in availability.get('sources',[]) if isinstance(v,dict) and v.get('id') in ('coindesk','newsbtc','frb_press','bls_cpi','bls_empsit','bls_jolts')]
     for s in SYMBOLS:
         a=r.get('assets',{}).get(s,{})
         out['assets'][s]={'recorded':number(a.get('recorded')),'evaluated':number(a.get('evaluated')),'engines':{}}
@@ -157,6 +163,8 @@ def render(r):
         content+=card('データ待ち','<p>保存済みの集計をまだ読み取れません。画面から予測を起動することはありません。</p>')
         return page_shell('Phase 8a',content,'phase8a',refresh=60).replace('<html lang="en">','<html lang="ja">')
     content+='<p class="muted">表示時刻は日本時間（JST）。照合レポート更新：'+stamp(r['as_of'])+'。60秒ごとに画面を更新します。</p>'
+    if r.get('news_policy_since') is not None:
+        content+=card('ニュース収集条件', '<p>'+stamp(r['news_policy_since'])+'以降：CoinDesk・NewsBTCと公的発表を共通の候補に使用。直近24時間・取得時刻・重複除去のルールは維持し、鮮度確認できない配信元だけを除外します。過去の成績も残しているため、条件変更前後を含む集計です。</p>'+styled_table(('配信元','取得の鮮度','24時間内の記事数'),[[v['id'],'確認済み' if v['healthy'] else '利用見送り',v['articles_24h']] for v in r.get('news_sources',[])])+'<p>現在の選別対象記事数：'+str(r.get('news_available_now') if r.get('news_available_now') is not None else '不明')+'。これは最新の収集状況であり、選択した過去予測の入力ではありません。</p>')
     if r['stale']:content+=card('更新が遅れています','<p>集計が5分以上更新されていないか、更新時刻が不明です。保存済みの値を表示しています。</p>')
     content+=card('稼働状況',metric_blocks([('予測の設定','有効' if r['enabled'] else '無効'),('直近処理',STATUSES[r['latest_status']]),('記録済み時刻',r['assets'][symbol]['recorded']),('答え合わせ済み',r['assets'][symbol]['evaluated'])])+'<p class="muted">設定と保存済み記録を表示しています。サービスの現在の稼働を保証する表示ではありません。</p>')
     form='<form method="get" action="/phase8a/"><input type="hidden" name="symbol" value="'+symbol+'"><label for="cohort">予測時刻（JST）</label> <select id="cohort" name="cutoff">'

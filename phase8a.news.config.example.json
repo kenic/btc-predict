@@ -1,20 +1,20 @@
 {
-  "interval_seconds": 3600,
+  "interval_seconds": 600,
   "feeds": [
     {
       "id": "coindesk",
       "publisher": "CoinDesk",
       "adapter": "rss",
       "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-      "enabled": false,
+      "enabled": true,
       "language": "en",
       "category": "crypto",
       "attribution": "CoinDesk (original publisher)",
       "policy": {
-        "mode": "blocked",
-        "model_input": false,
-        "reviewed_on": "2026-11-11",
-        "basis": "RSS is advertised, but terms require express written permission for automated access. Obtain permission covering archival raw RSS and AI input before enabling.",
+        "mode": "rss",
+        "model_input": true,
+        "reviewed_on": "2026-11-13",
+        "basis": "Operator-approved RSS use recorded in production on 2026-11-12; title/description research only, attribution retained, no linked article scraping. This records operator approval, not a separate written license.",
         "references": [
           "https://www.coindesk.com/terms",
           "https://www.coindesk.com/coindesk-news/2021/09/17/coindesk-rss"

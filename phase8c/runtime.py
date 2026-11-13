@@ -53,7 +53,7 @@ def run(db, news_db, config, cutoff=None, mode='offline', clock=time.time, call=
     reason = None
     if not frozen['state']['news']:
         reason = 'no_eligible_news'
-    elif any(r['enabled'] and r['stale'] and r['feed_id'] in config['allowed_sources']
+    elif any(r['enabled'] and r['stale'] and r['feed_id'] in {n['source_id'] for n in frozen['state']['news']}
              for r in frozen['snapshot']['coverage']):
         reason = 'source_stale'
     if not reason and mode == 'live':

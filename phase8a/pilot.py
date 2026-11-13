@@ -26,7 +26,7 @@ def prepare(config, news_db, cutoff, allow_unpriced_kairos=False):
         frozen = freeze(snap, c, cutoff)
         if not frozen['state']['news']:
             raise ValueError('no_eligible_news_' + symbol)
-        if any(r['enabled'] and r['stale'] and r['feed_id'] in c['allowed_sources'] for r in snap['coverage']):
+        if any(r['enabled'] and r['stale'] and r['feed_id'] in {n['source_id'] for n in frozen['state']['news']} for r in snap['coverage']):
             raise ValueError('source_stale')
         adapters.preflight(c, frozen['state'], allow_unpriced_kairos=allow_unpriced_kairos)
         bounds = {}

@@ -10,7 +10,7 @@ ENGINES = ('gpt6_astra', 'claude_fable', 'jev', 'kairos')
 KEYS = dict(zip(ENGINES, ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'TYPESAFE_API_KEY', 'KAIROS_API_KEY')))
 VERSION = 'phase8a.v1'
 SYMBOLS = ('BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'LINK-USD')
-SELECTION_VERSION = 'asset-direct-common-newest-url-text-v2'
+SELECTION_VERSION = 'asset-direct-common-healthy-sources-v3'
 ASSET_PATTERNS = {
     'BTC-USD': r'\b(?:bitcoin|BTC)\b',
     'ETH-USD': r'\b(?:ethereum|ether|ETH)\b',
@@ -123,6 +123,7 @@ def freeze(snapshot, c, cutoff):
     """Keep full eligible snapshot in storage; send a bounded, identical projection."""
     if snapshot['as_of'] != cutoff or snapshot['schema_version'] != 'phase8pre.news.v1':
         raise ValueError('snapshot_cutoff_mismatch')
+    healthy={r['feed_id'] for r in snapshot['coverage'] if r.get('enabled') is True and r.get('stale') is False}
     selected, decisions, seen_url, seen_text = [], [], set(), set()
     for n in sorted(snapshot['news'], key=lambda n: (relevance(n, c['symbol']) != 'direct', -n['published_at'], n['source_id'], n['article_id'])):
         reason = None
@@ -131,6 +132,8 @@ def freeze(snapshot, c, cutoff):
         text_id = digest(' '.join((n['title']+' '+n['summary']).lower().split()))
         if n['language'] != 'en' or n['source_id'] not in c['allowed_sources']:
             reason = 'source_or_language'
+        elif n['source_id'] not in healthy:
+            reason = 'source_unavailable'
         elif relevance(n, c['symbol']) is None:
             reason = 'not_relevant'
         elif n['url'] in seen_url or text_id in seen_text:

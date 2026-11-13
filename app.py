@@ -1376,7 +1376,7 @@ def phase8pre_dashboard():
     return render(data, historical=bool(request.args.get('as_of'))), status
 
 
-PHASE8A_WEB_ROOT = Path('/opt/btc-phase8a/outputs/hourly-20261112')
+PHASE8A_WEB_ROOT = Path('/opt/btc-phase8a/outputs/news-v2-20261113')
 
 @app.route('/phase8a/')
 @app.route('/phase8a/data.json')
@@ -1390,7 +1390,7 @@ def phase8a_dashboard():
     return (data if request.path.endswith('.json') else render(data)), status
 
 
-PHASE8B_WEB_ROOT = Path('/opt/btc-phase8b/outputs/hourly-v1')
+PHASE8B_WEB_ROOT = Path('/opt/btc-phase8b/outputs/news-v2-20261113')
 
 @app.route('/phase8b/')
 @app.route('/phase8b/data.json')
@@ -1403,7 +1403,7 @@ def phase8b_dashboard():
     return (data if request.path.endswith('.json') else render(data)), (200 if data['phase8b']['status']=='ok' else 503)
 
 
-PHASE8C_WEB_ROOT = Path('/opt/btc-phase8c/outputs/hourly-v1')
+PHASE8C_WEB_ROOT = Path('/opt/btc-phase8c/outputs/news-v2-20261113')
 
 @app.route('/phase8c/')
 @app.route('/phase8c/data.json')

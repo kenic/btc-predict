@@ -98,8 +98,31 @@ class Phase8aTests(unittest.TestCase):
     def test_stale_source_prevents_calls(self):
         self.ingest(available=T-7200, published=T-8000)
         call = Mock()
-        self.assertEqual(self.run_cutoff(call=call)['reason'], 'source_stale')
+        self.assertEqual(self.run_cutoff(call=call)['reason'], 'no_eligible_news')
         call.assert_not_called()
+
+    def test_unhealthy_source_isolated_and_three_conditions_share_selection(self):
+        import copy
+        from phase8b import core as bcore
+        from phase8c import core as ccore
+        self.ingest(available=T-7200,published=T-8000,title='Bitcoin stale source')
+        alternate=copy.deepcopy(self.source);alternate['id']='coindesk'
+        self.ingest(source=alternate,title='Bitcoin fresh source',guid='healthy',url='https://example.org/healthy')
+        snap=ns.snapshot(self.news,T,deduplicate=False)
+        selections=[module.freeze(snap,self.c,T) for module in (core,bcore,ccore)]
+        self.assertEqual(len({v['state']['news_set_id'] for v in selections}),1)
+        self.assertEqual([n['source_id'] for n in selections[0]['state']['news']],['coindesk'])
+        self.assertIn('source_unavailable',[d['reason'] for d in selections[0]['news_set']['decisions']])
+        seen=[]
+        def call(e,state,c):
+            seen.append(copy.deepcopy(state));return adapters.fixture_invoke(e,state,c)
+        self.run_cutoff(call=call)
+        self.assertEqual(len(seen),4);self.assertTrue(all(v==seen[0] for v in seen))
+        self.assertTrue(all(r['status']=='ok' for r in self.calls().values()))
+
+    def test_unknown_source_health_fails_closed(self):
+        self.ingest();snap=ns.snapshot(self.news,T,deduplicate=False);snap['coverage']=[]
+        self.assertEqual(core.freeze(snap,self.c,T)['state']['news'],[])
 
     def test_shared_input_concurrent_dispatch_and_no_mutation(self):
         self.ingest()
@@ -402,8 +425,8 @@ class Phase8aTests(unittest.TestCase):
         self.assertEqual(seen[0]['state']['cutoff'], T)
         self.assertEqual(adapters.parse('jev', raw)['probability_up'], .7)
 
-    def test_hourly_collection_configuration_and_invalid_interval(self):
-        self.assertEqual(load_config(ROOT/'phase8a.news.config.example.json')['interval_seconds'], 3600)
+    def test_ten_minute_collection_configuration_and_invalid_interval(self):
+        self.assertEqual(load_config(ROOT/'phase8a.news.config.example.json')['interval_seconds'], 600)
         self.assertEqual(load_config(ROOT/'news.config.example.json')['interval_seconds'], 900)
         for invalid in (True, 3600.0, 3601, 599):
             config = json.loads((ROOT/'news.config.example.json').read_text())
