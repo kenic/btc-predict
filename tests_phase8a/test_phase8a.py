@@ -120,6 +120,19 @@ class Phase8aTests(unittest.TestCase):
         self.assertEqual(len(seen),4);self.assertTrue(all(v==seen[0] for v in seen))
         self.assertTrue(all(r['status']=='ok' for r in self.calls().values()))
 
+    def test_partial_collection_export_keeps_healthy_news(self):
+        import copy
+        from deploy.export_readonly_archive import export
+        self.ingest(available=T-7200,published=T-8000)
+        alternate=copy.deepcopy(self.source);alternate['id']='coindesk'
+        self.ingest(source=alternate,title='Bitcoin new feed',guid='fresh',url='https://example.org/fresh')
+        rid=ns.start_run(self.news,self.source,3600,lambda:T-6)
+        ns.finish_run(self.news,rid,'failed',http_status=503,error='http_error',clock=lambda:T-5)
+        destination=self.path/'reader-news.db'
+        export(self.news,destination,'news')
+        selected=core.freeze(ns.snapshot(destination,T,deduplicate=False),self.c,T)['state']['news']
+        self.assertEqual([v['source_id'] for v in selected],['coindesk'])
+
     def test_unknown_source_health_fails_closed(self):
         self.ingest();snap=ns.snapshot(self.news,T,deduplicate=False);snap['coverage']=[]
         self.assertEqual(core.freeze(snap,self.c,T)['state']['news'],[])

@@ -28,13 +28,18 @@ version IDs, bytes and news_set_id. Model settings, prompt, horizon and technica
 conditions are unchanged. All phases move to separate `outputs/news-v2-20261113`
 ledgers at a future aligned cutoff. Never delete/reset an existing contract or
 reservation. Archive previous config/schedule/source files before updating runtime.
-Old batches are listed in `additional_batches`, so mature evaluations and Web
-history remain available. Aggregates include both source regimes and the Web
+Existing run artifacts are copied byte-for-byte (SQLite databases through consistent
+backup) into the new run tree; originals remain untouched. Prior ledger rows, call
+counts and budget reservations are carried forward, with lineage metadata instead
+of resetting the old contract. Existing standalone additional batches remain listed.
+Mature evaluations and full Web history remain available. Aggregates include both source regimes and the Web
 explicitly labels the transition; pair comparisons still require matching news IDs.
 
 Collection is every ten minutes at :09/:19/:29/:39/:49/:59 UTC, allowing the final
 collection and SQLite reader export to complete before the hourly cutoff. All
-first-available timestamps remain actual receipt times. A delayed :59 fetch cannot
+first-available timestamps remain actual receipt times. The reader export runs in
+ExecStopPost, so committed healthy-feed observations are published even if another
+feed makes the collector exit nonzero; feed failures remain visible in health logs. A delayed :59 fetch cannot
 be smuggled into that hour; the selection uses the earlier known archive versions.
 
 The Web shows safe feed status/article counts and the current eligible count per
