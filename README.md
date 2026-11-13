@@ -92,3 +92,7 @@ Hourly 4h forecasts with multi-timeframe indicators, orderbook, trade flow and n
 Shared news continuity and source transition: [NEWS_CONTINUITY.md](NEWS_CONTINUITY.md).
 
 BTC trade-gap repair for 8c preserves actual first-observed timestamps; see [PHASE8C.md](PHASE8C.md).
+
+## Phase 8d / 8pre2
+
+BTC and XRP new-news event forecasting: see PHASE8D.md. Technical and quote infrastructure: PHASE8PRE2.md. Old 8a/b/c historical outcomes remain separate.
