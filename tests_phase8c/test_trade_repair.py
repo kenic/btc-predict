@@ -32,6 +32,16 @@ class TradeRepairTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT observed FROM trades WHERE id=100').fetchone()[0],T-5)
             self.assertEqual(c.execute('SELECT observed FROM trades WHERE id=101').fetchone()[0],T-1)
 
+    def test_collector_repairs_internal_gap_after_previous_id_overlap(self):
+        self.save(100)
+        with patch('phase8c.micro.get',side_effect=[
+                ([self.row(103),self.row(101),self.row(100)],None),
+                ([self.row(102),self.row(101),self.row(100)],None)]) as get:
+            result=micro.collect_symbol(self.path,'BTC-USD',lambda:T-1)
+        self.assertEqual(result['status'],'ok');self.assertTrue(result['continuous'])
+        self.assertEqual(result['gap_repair'],dict(pages=1,inserted=1))
+        self.assertEqual(self.ids(T),[100,101,102,103]);self.assertEqual(get.call_count,2)
+
     def test_late_repairs_cannot_change_old_cutoff_and_no_overwrite(self):
         self.save(100);self.save(102)
         with patch('phase8c.micro.get',return_value=([self.row(101),self.row(100,size=99)],None)):
