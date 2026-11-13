@@ -5,6 +5,7 @@
   "horizon_seconds": 14400,
   "lookback_hours": 24,
   "allowed_sources": [
+    "coindesk",
     "frb_press",
     "bls_cpi",
     "bls_empsit",

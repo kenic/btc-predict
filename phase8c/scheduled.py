@@ -91,11 +91,12 @@ def predict(policy, clock=time.time, call=None):
                                         baseline_root=policy['baseline_root'],technical_db=policy['technical_db'])
             if ceiling>2.0:raise ValueError('batch_ceiling_limit')
             if clock()>cutoff+config['max_start_delay_seconds']:raise ValueError('late_preflight')
-        except Exception:
+        except Exception as exc:
+            reason=str(exc) if isinstance(exc,ValueError) and str(exc) in ({'no_eligible_news_'+s for s in SYMBOLS}|{'source_stale','late_preflight','batch_ceiling_limit','technical_history_missing_or_late','micro_coverage_incomplete','btc_trade_coverage_gap','trade_pagination_gap'}) else 'input_or_preflight_unavailable'
             with closing(ledger(path)) as c,c:
                 c.execute('INSERT OR IGNORE INTO batches VALUES(?,?,?,?,?,?)',
                           (cutoff,clock(),0,0,'preflight_skipped',''))
-            return {'status':'preflight_skipped','cutoff':cutoff,'reason':'baseline_technical_or_budget_preflight_failed'}
+            return {'status':'preflight_skipped','cutoff':cutoff,'reason':reason}
         directory=root/'runs'/str(cutoff)
         if not reserve(path,cutoff,clock(),ceiling,policy,directory):
             return {'status':'already_attempted_no_retry','cutoff':cutoff}
@@ -156,6 +157,20 @@ def aggregate(policy, clock=time.time):
     output={'as_of':clock(),'assets':{},'answers':[],'prediction_enabled':policy['enabled'],
             'kairos_cost_unknown':True,'known_daily_budget_usd':policy['known_daily_budget_usd'],
             'known_30day_budget_usd':policy['known_30day_budget_usd']}
+    # Public numeric coverage diagnostics, no headlines or credentials.
+    try:
+        from news.store import snapshot
+        from .core import freeze, SELECTION_VERSION
+        config=validate_config(json.loads(Path(policy['config']).read_text()))
+        snap=snapshot(policy['news_db'],output['as_of'],hours=config['lookback_hours'],deduplicate=False)
+        output['news_policy']={'selection_version':SELECTION_VERSION,'since':policy['start_cutoff'],'allowed_sources':config['allowed_sources']}
+        output['news_availability']={'as_of':output['as_of'],'sources':[
+            {'id':r['feed_id'],'healthy':r['enabled'] and not r['stale'],
+             'articles_24h':sum(n['source_id']==r['feed_id'] for n in snap['news'])}
+            for r in snap['coverage'] if r['feed_id'] in config['allowed_sources']],
+            'assets':{symbol:len(freeze(snap,{**config,'symbol':symbol},output['as_of'])['state']['news']) for symbol in SYMBOLS}}
+    except (OSError,ValueError,KeyError,TypeError,sqlite3.Error):
+        output['news_availability']={'status':'unavailable'}
     for symbol in SYMBOLS:
         records=[]
         for directory in batch_paths(policy):

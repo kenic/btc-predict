@@ -88,3 +88,5 @@ The [Phase 8a page](https://btc.kenic.jp/phase8a/) shows saved five-asset foreca
 
 See [Phase 8c operation and comparison contract](PHASE8C.md).
 Hourly 4h forecasts with multi-timeframe indicators, orderbook, trade flow and news; /phase8c/ compares 8a, 8b and 8c.
+
+Shared news continuity and source transition: [NEWS_CONTINUITY.md](NEWS_CONTINUITY.md).

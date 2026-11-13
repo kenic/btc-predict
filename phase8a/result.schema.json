@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:btc-predict:phase8a:result:v1",
+  "title": "Phase 8a recorded engine result (pending/reserved are ledger states, not results)",
+  "type": "object",
+  "required": [
+    "schema",
+    "engine",
+    "configured_model",
+    "model_version",
+    "provider_model_version",
+    "direction",
+    "probability_up",
+    "probability_kind",
+    "calibration_id",
+    "provider_confidence",
+    "news_set_id",
+    "input_id",
+    "news_versions",
+    "cutoff",
+    "target_end",
+    "requested_at",
+    "completed_at",
+    "latency_ms",
+    "error",
+    "http_status",
+    "raw",
+    "usage",
+    "cost_usd",
+    "cost_kind",
+    "request_hash",
+    "request_json",
+    "kairos_profile",
+    "status",
+    "symbol"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "phase8a.v1"
+    },
+    "engine": {
+      "enum": [
+        "gpt6_astra",
+        "claude_fable",
+        "jev",
+        "kairos"
+      ]
+    },
+    "configured_model": {},
+    "model_version": {},
+    "provider_model_version": {},
+    "direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        null
+      ]
+    },
+    "probability_up": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "probability_kind": {
+      "const": "uncalibrated"
+    },
+    "calibration_id": {
+      "type": "null"
+    },
+    "provider_confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "news_set_id": {},
+    "input_id": {},
+    "news_versions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "article_id",
+          "version_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "article_id": {
+            "type": "integer"
+          },
+          "version_id": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "cutoff": {
+      "type": "number",
+      "minimum": 0
+    },
+    "target_end": {
+      "type": "number",
+      "minimum": 0
+    },
+    "requested_at": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "completed_at": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "latency_ms": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "error": {},
+    "http_status": {},
+    "raw": {},
+    "usage": {},
+    "cost_usd": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "cost_kind": {},
+    "request_hash": {},
+    "request_json": {},
+    "kairos_profile": {},
+    "status": {
+      "enum": [
+        "ok",
+        "error",
+        "late",
+        "skipped"
+      ]
+    },
+    "provider_calibration_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "symbol": {
+      "enum": [
+        "BTC-USD",
+        "ETH-USD",
+        "SOL-USD",
+        "XRP-USD",
+        "LINK-USD"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "probability_up": {
+            "type": "number"
+          },
+          "direction": {
+            "enum": [
+              "UP",
+              "DOWN"
+            ]
+          },
+          "model_version": {
+            "type": "string"
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}
