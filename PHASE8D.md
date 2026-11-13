@@ -95,3 +95,13 @@ server-only dotenv file via its pathname. All timestamps stored UTC, Web display
 Tests: `python -m unittest tests_phase8d.test_phase8d -v` plus existing Phase 8/UI
 regression tests. Fixtures cover no replay, dedup/revisions, input availability,
 quote timing, thresholds, costs, API failures, budget reservations and HTML escaping.
+
+### Legacy collector compatibility
+
+The standalone `/opt/btc-news` collector originally enforced a 600-second minimum.
+Apply `deploy/enable_news_minute_interval.py --root /opt/btc-news` before configuring
+60-second polling. The tool accepts only the known legacy source or its own patched
+version, saves an original backup and records before/after hashes. This change is
+collector-only: do not replace the frozen `news/` copy inside an active 8d runtime.
+Source model-input policies and Retry-After remain unchanged. Verify a successful
+scheduled run with `interval_seconds=60`, not merely an active timer.
