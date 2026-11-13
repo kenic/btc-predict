@@ -93,3 +93,6 @@ Read-only Web comparison at `/phase8c/`, with legacy and abstention-aware metric
 
 News continuity and the shared-source transition for 8a/8b/8c are documented in
 [NEWS_CONTINUITY.md](NEWS_CONTINUITY.md).
+
+Phase 8c now repairs recent BTC trade-ID gaps during public data collection,
+without relaxing point-in-time completeness checks; see [PHASE8C.md](PHASE8C.md).
