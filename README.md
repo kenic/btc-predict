@@ -96,3 +96,11 @@ News continuity and the shared-source transition for 8a/8b/8c are documented in
 
 Phase 8c now repairs recent BTC trade-ID gaps during public data collection,
 without relaxing point-in-time completeness checks; see [PHASE8C.md](PHASE8C.md).
+
+## Phase 8d: BTC / XRP new-news forecasts
+
+[Phase 8d](PHASE8D.md) consolidates the experiment into new-news-triggered,
+four-engine forecasts with technical inputs, 45–55% abstention, separate four-hour
+prediction scores and post-response paper returns. The reusable market archive is
+[Phase 8pre2](PHASE8PRE2.md), extracted from 8c. Dashboard: `/phase8d/`.
+Old 8a/b/c history and pending outcome evaluation are preserved at migration.

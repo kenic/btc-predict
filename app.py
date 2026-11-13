@@ -1416,6 +1416,18 @@ def phase8c_dashboard():
     return (data if request.path.endswith('.json') else render(data)), (200 if data['phase8c']['status']=='ok' else 503)
 
 
+PHASE8D_DB = Path('/opt/btc-phase8d/data/events.sqlite3')
+PHASE8PRE2_QUOTES = Path('/opt/btc-phase8pre2/data/quotes.sqlite3')
+
+@app.route('/phase8d/')
+@app.route('/phase8d/data.json')
+def phase8d_dashboard():
+    from phase8d_views import report,render
+    try:data=report(PHASE8D_DB,PHASE8PRE2_QUOTES,request.args.get('symbol','BTC-USD'))
+    except ValueError:return {'status':'invalid_symbol'},400
+    return (data if request.path.endswith('.json') else render(data)),200,{'Cache-Control':'no-store'}
+
+
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",

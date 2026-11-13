@@ -1,0 +1,24 @@
+[Unit]
+Description=Phase 8pre2 BTC XRP executable quote archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/btc-phase8pre2
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/btc-predict/.venv/bin/python -m phase8pre2.cli quotes --directory /opt/btc-phase8pre2/data
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=150
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/btc-phase8pre2/data
+
+[Install]
+WantedBy=multi-user.target

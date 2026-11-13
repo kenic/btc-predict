@@ -1,7 +1,7 @@
 """Shared, presentation-only HTML helpers. Content passed to shell/card is trusted HTML."""
 from html import escape
 
-NAV = (('current', '/', 'Current'), ('direction', '/direction/', 'Direction'),
+NAV = (('phase8d', '/phase8d/', 'Phase 8d'), ('current', '/', 'Current'), ('direction', '/direction/', 'Direction'),
        ('volatility', '/volatility/', 'Volatility'), ('repeated', '/repeated/', 'Repeated'),
        ('regression', '/regression/', 'Regression'), ('phase5b', '/phase5b/', 'Phase 5b'), ('phase5c', '/phase5c/', 'Phase 5c'),
        ('phase6', '/direction-active/', 'Active Direction'), ('phase6b', '/phase6b/', 'Phase 6b'), ('phase6c', '/phase6c/', 'Phase 6c'), ('phase6d', '/phase6d/', 'Phase 6d'), ('phase7', '/phase7/', 'Phase 7'), ('phase8pre', '/phase8pre/', 'Phase 8pre'), ('phase8a', '/phase8a/', 'Phase 8a'), ('phase8b', '/phase8b/', 'Phase 8b / 比較'), ('phase8c', '/phase8c/', 'Phase 8c / 比較'), ('analysis', '/analyze/', 'Analysis'))
