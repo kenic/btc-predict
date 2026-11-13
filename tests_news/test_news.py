@@ -312,9 +312,23 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(retry_delay('Tue, 14 Nov 2023 22:14:20 GMT',PUB),60)
         self.assertEqual(retry_delay('invalid',PUB),0)
 
+    def test_event_collection_allows_one_minute(self):
+        config = load_config(ROOT/'news.config.example.json')
+        config['interval_seconds'] = 60
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'config.json'
+            path.write_text(json.dumps(config))
+            self.assertEqual(load_config(path)['interval_seconds'], 60)
+        from deploy.enable_news_minute_interval import upgrade
+        old = "    if config.get('interval_seconds') not in range(600, 901):\n        raise ValueError('interval_must_be_600_to_900')"
+        updated = upgrade(old)
+        self.assertIn('60 <= interval <= 900', updated)
+        self.assertEqual(upgrade(updated), updated)
+        with self.assertRaises(ValueError): upgrade('unknown source')
+
     def test_bad_configuration(self):
         config = load_config(ROOT/'news.config.example.json')
-        for mutate in [lambda c:c.update(interval_seconds=60),
+        for mutate in [lambda c:c.update(interval_seconds=59),
                        lambda c:c['feeds'][0].update(enabled=True),
                        lambda c:c['feeds'][1].update(url='https://example.org/?token=secret')]:
             broken = copy.deepcopy(config)

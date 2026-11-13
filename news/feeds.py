@@ -58,8 +58,8 @@ def load_config(path):
     with open(path, encoding='utf-8') as f:
         config = json.load(f)
     interval = config.get('interval_seconds')
-    if type(interval) is not int or not 600 <= interval <= 3600:
-        raise ValueError('interval_must_be_integer_600_to_3600')
+    if type(interval) is not int or not 60 <= interval <= 3600:
+        raise ValueError('interval_must_be_integer_60_to_3600')
     ids = set()
     for source in config['feeds']:
         if not re.fullmatch(r'[a-z0-9_-]+', source['id']) or source['id'] in ids:
